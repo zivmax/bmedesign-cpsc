@@ -51,4 +51,5 @@ class SignalOps:
     
     @staticmethod
     def moving_average(signal, window_length=5):
-        return np.convolve(signal, np.ones(len(signal))/ window_length, mode='same')
+        window = np.ones(window_length) / window_length
+        return np.convolve(signal, window, mode='same')
