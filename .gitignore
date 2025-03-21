@@ -1,2 +1,4 @@
 *.mat
 *.csv
+_pycache_
+*.pyc
