@@ -33,6 +33,9 @@ class SignalOps:
         b, a = sig.butter(order, [low, high], btype='band')
         return sig.filtfilt(b, a, signal)
     
+    
+
+class SignalFeatures:
     @staticmethod
     def ps_density(signal, fs=400, nperseg=256):
         f, Psd = sig.welch(signal, fs=fs, nperseg=nperseg)
