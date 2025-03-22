@@ -2,6 +2,10 @@ import numpy as np
 from scipy import signal as sig
 from scipy.stats import entropy
 from scipy.fft import fft, fftfreq
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pandas import DataFrame
+from typing import Tuple
 
 class SignalOps:
     @staticmethod
@@ -33,7 +37,6 @@ class SignalOps:
         b, a = sig.butter(order, [low, high], btype='band')
         return sig.filtfilt(b, a, signal)
     
-    
 
 class SignalFeatures:
     @staticmethod
@@ -56,3 +59,291 @@ class SignalFeatures:
     def moving_average(signal, window_length=5):
         window = np.ones(window_length) / window_length
         return np.convolve(signal, window, mode='same')
+    
+
+class SignalPlot:
+    @staticmethod
+    def fft_plot(signal, fs=400, duration=10):
+    
+        n = len(signal)
+        if duration is None:
+            duration = n/fs
+        t = np.linspace(0, duration, n)
+
+        fft_result = np.fft.fft(signal)
+        freq = np.fft.fftfreq(n, 1/fs)
+
+        phase = np.angle(fft_result)
+
+        plt.figure(figsize=(12, 9))
+
+        plt.subplot(3, 1, 1)
+        plt.plot(t, signal)
+        plt.title('Original Signal')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Amplitude')
+        plt.grid(True)
+
+        plt.subplot(3, 1, 2)
+        freq_range = n // 2
+        plt.plot(freq[:freq_range], np.abs(fft_result)[:freq_range]*2/n)
+        plt.title('Frequency Spectrum (Magnitude)')
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Magnitude')
+        plt.grid(True)
+
+        plt.subplot(3, 1, 3)
+        plt.plot(freq[:n//2], phase[:n//2])
+        plt.title('Frequency Spectrum (Phase)')
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Phase (radians)')
+        plt.grid(True)
+
+        plt.tight_layout()
+        plt.show()
+    @staticmethod
+    def statistics_plot(df:DataFrame, freq_df:DataFrame, cutedge=500, linerange=4000):
+
+        t = np.linspace(0, linerange, linerange)
+        plt.figure(figsize=(16, 20))
+
+        plt.subplot(3, 2, 1)
+        disease_std = df[:cutedge].std(axis=0)  
+        healthy_std = df[cutedge:].std(axis=0)
+
+        sns.lineplot(x=t, y=disease_std, label='Has Disease')
+        sns.lineplot(x=t, y=healthy_std, label='Healthy')
+
+        plt.title('Standard Deviation of Signals')
+        plt.xlabel('sample point')
+        plt.ylabel('Standard Deviation')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        plt.subplot(3, 2, 2)
+        disease_mean = df[:cutedge].mean(axis=0)
+        healthy_mean = df[cutedge:].mean(axis=0)
+
+        disease_se = df[:cutedge].sem(axis=0)
+        healthy_se = df[cutedge:].sem(axis=0)
+
+
+        plt.plot(t, disease_mean, label='Has Disease', color='blue')
+        plt.plot(t, healthy_mean, label='Healthy', color='orange')
+
+        plt.fill_between(t, disease_mean-disease_se, disease_mean+disease_se, 
+                         alpha=0.3, color='blue', label='_nolegend_')
+        plt.fill_between(t, healthy_mean-healthy_se, healthy_mean+healthy_se, 
+                         alpha=0.3, color='orange', label='_nolegend_')
+
+        plt.title('Mean of Signals')
+        plt.xlabel('sample point')
+        plt.ylabel('Mean Magnitude')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        # ============================================================================
+        plt.subplots_adjust(hspace=0.15)
+        num_points = np.linspace(0, cutedge, cutedge)
+
+        plt.subplot(3, 2, 3)
+        disease_fft_mean = freq_df[:cutedge]['fft_mean']
+        healthy_fft_mean = freq_df[cutedge:]['fft_mean']
+
+        disease_fft_se = freq_df[:cutedge]['fft_std'] / np.sqrt(len(freq_df[:cutedge]))
+        healthy_fft_se = freq_df[cutedge:]['fft_std'] / np.sqrt(len(freq_df[cutedge:]))
+
+
+        plt.plot(num_points, disease_fft_mean, label='Has Disease', color='blue')
+        plt.plot(num_points, healthy_fft_mean, label='Healthy', color='orange')
+
+
+        plt.fill_between(num_points, disease_fft_mean-disease_fft_se, disease_fft_mean+disease_fft_se, 
+                         alpha=0.3, color='blue', label='_nolegend_')
+        plt.fill_between(num_points, healthy_fft_mean-healthy_fft_se, healthy_fft_mean+healthy_fft_se, 
+                         alpha=0.3, color='orange', label='_nolegend_')
+
+        plt.title('Mean FFT result')
+        plt.xlabel('data point')
+        plt.ylabel('Mean FFT Result')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+
+        plt.subplot(3, 2, 4)
+        disease_phase_mean = freq_df[:cutedge]['phase_mean']
+        healthy_phase_mean = freq_df[cutedge:]['phase_mean']
+
+
+        disease_phase_se = freq_df[:cutedge]['phase_std'] / np.sqrt(len(freq_df[:cutedge]))
+        healthy_phase_se = freq_df[cutedge:]['phase_std'] / np.sqrt(len(freq_df[cutedge:]))
+
+
+        plt.plot(num_points, disease_phase_mean, label='Has Disease', color='blue')
+        plt.plot(num_points, healthy_phase_mean, label='Healthy', color='orange')
+
+
+        plt.fill_between(num_points, disease_phase_mean-disease_phase_se, disease_phase_mean+disease_phase_se, 
+                         alpha=0.3, color='blue', label='_nolegend_')
+        plt.fill_between(num_points, healthy_phase_mean-healthy_phase_se, healthy_phase_mean+healthy_phase_se, 
+                         alpha=0.3, color='orange', label='_nolegend_')
+
+        plt.title('Mean phase result')
+        plt.xlabel('data point')
+        plt.ylabel('Mean phase Result')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+
+        plt.subplot(3, 2, 5)
+        disease_fft_std = freq_df[:cutedge]['fft_std']
+        healthy_fft_std = freq_df[cutedge:]['fft_std']
+
+        sns.lineplot(x=num_points, y=disease_fft_std, label='Has Disease')
+        sns.lineplot(x=num_points, y=healthy_fft_std, label='Healthy')
+
+        plt.title('FFT std result')
+        plt.xlabel('data point')
+        plt.ylabel('FFT std Result')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+
+        plt.subplot(3, 2, 6)
+        disease_phase_std = freq_df[:cutedge]['phase_std']
+        healthy_phase_std = freq_df[cutedge:]['phase_std']
+
+        sns.lineplot(x=num_points, y=disease_phase_std, label='Has Disease')
+        sns.lineplot(x=num_points, y=healthy_phase_std, label='Healthy')
+
+        plt.title('Phase std result')
+        plt.xlabel('data point')
+        plt.ylabel('Phase std Result')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        plt.tight_layout()
+        plt.show()
+    @staticmethod
+    def binary_class_differential_plot(healthy:Tuple[DataFrame, DataFrame], 
+                                       ill:Tuple[DataFrame, DataFrame], 
+                                       duration=4000, 
+                                       title='Differential Plot', 
+                                       label1='origin', 
+                                       label2='transformed'):
+        healthy_origin = healthy[0]
+        healthy_transformed = healthy[1]
+        t = np.linspace(0, duration, duration)
+        plt.figure(figsize=(16, 12))
+
+        plt.subplot(2, 2, 1)
+        sns.lineplot(x=t, y=healthy_origin, label=label1)
+        sns.lineplot(x=t, y=healthy_transformed, label=label2)
+        plt.title('healthy ' + title)
+        plt.xlabel('sample point')
+        plt.ylabel('Magnitude')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        plt.subplot(2, 2, 2)
+        sns.lineplot(x=t, y=healthy_origin, label=label1)
+        sns.lineplot(x=t, y=healthy_origin-healthy_transformed, label=label1 + '-' + label2)
+        plt.title('healthy ' + title)
+        plt.xlabel('sample point')
+        plt.ylabel('Magnitude')
+        plt.legend()
+
+        plt.subplots_adjust(hspace=0.3)
+        ill_origin = ill[0]
+        ill_transformed = ill[1]
+
+        plt.subplot(2, 2, 3)
+        sns.lineplot(x=t, y=ill_origin, label=label1)
+        sns.lineplot(x=t, y=ill_transformed, label=label2)
+        plt.title('ill ' + title)
+        plt.xlabel('sample point')
+        plt.ylabel('Magnitude')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.subplot(2, 2, 4)
+        sns.lineplot(x=t, y=ill_origin, label=label1)
+        sns.lineplot(x=t, y=ill_origin-ill_transformed, label=label1 + '-' + label2)
+        plt.title('ill ' + title)
+        plt.xlabel('sample point')
+        plt.ylabel('Magnitude')
+        plt.legend()
+
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.show()
+    @staticmethod
+    def signal_feature_plot(df:DataFrame, cutedge=500):
+        t = np.linspace(0, cutedge, cutedge)
+        ill_df = df[:cutedge]
+        healty_df = df[cutedge:]
+        plt.figure(figsize=(16, 12))
+
+        plt.subplot(2, 2, 1)
+        sns.lineplot(x=t, y=healty_df['peaks'], label='Healthy')
+        sns.lineplot(x=t, y=ill_df['peaks'], label='Has Disease')
+        plt.title('Peaks Count')
+        plt.xlabel('Sample point')
+        plt.ylabel('Count')
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        plt.subplot(2, 2, 2)
+        sns.lineplot(x=t, y=healty_df['ps_density_mean'], label='Healthy')
+        sns.lineplot(x=t, y=ill_df['ps_density_mean'], label='Has Disease')
+        plt.title('PS Density Mean')
+        plt.xlabel('sample point')
+        plt.ylabel('PS Density Mean')
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        plt.subplots_adjust(hspace=0.3)
+
+        plt.subplot(2, 2, 3)
+        sns.lineplot(x=t, y=healty_df['ps_density_std'], label='Healthy')
+        sns.lineplot(x=t, y=ill_df['ps_density_std'], label='Has Disease')
+        plt.title('PS Density Std')
+        plt.xlabel('sample point')
+        plt.ylabel('PS Density Std')
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        plt.subplot(2, 2, 4)
+        sns.lineplot(x=t, y=healty_df['entropy'], label='Healthy')
+        sns.lineplot(x=t, y=ill_df['entropy'], label='Has Disease')
+        plt.title('Entropy')
+        plt.xlabel('sample point')
+        plt.ylabel('Entropy')
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        plt.tight_layout()
+        plt.show()
+    @staticmethod
+    def time_shift_diff_plot(healthy:DataFrame, ill:DataFrame, lag=80):
+        shifted_signal = np.zeros_like(healthy)
+        shifted_signal[lag:] = healthy[:-lag]
+        healthy_diff = healthy - shifted_signal
+        shifted_signal[lag:] = ill[:-lag]
+        ill_diff = ill - shifted_signal
+        time_points = np.linspace(0, len(healthy_diff)-lag, len(healthy_diff)-lag)
+
+        plt.figure(figsize=(14, 8))
+        sns.lineplot(x=time_points, y=healthy_diff[lag:], linewidth=1, label='Healthy')
+        sns.lineplot(x=time_points, y=ill_diff[lag:], linewidth=1, label='Has Disease')
+        plt.title(f'Signal Difference Plot: signal[t] - signal[t-{lag}]')
+        plt.xlabel('Time (t)')
+        plt.ylabel(f'Difference: signal[t] - signal[t-{lag}]')
+        plt.grid(True)
+
+        # Add some statistics
+        plt.axhline(y=0, color='r', linestyle='--', alpha=0.3)
+        plt.axhline(y=np.mean(healthy_diff[lag:]), color='g', linestyle='--', alpha=0.7, 
+                    label=f'Healthy Mean: {np.mean(healthy_diff[lag:]):.4f}')
+        plt.axhline(y=np.mean(ill_diff[lag:]), color='r', linestyle='--', alpha=0.7, 
+                    label=f'Ill Mean: {np.mean(ill_diff[lag:]):.4f}')
+
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+        return healthy_diff, ill_diff
