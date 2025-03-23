@@ -102,14 +102,14 @@ class SignalPlot:
         plt.tight_layout()
         plt.show()
     @staticmethod
-    def statistics_plot(df:DataFrame, freq_df:DataFrame, cutedge=500, linerange=4000):
+    def statistics_plot(df:DataFrame, freq_df:DataFrame, cutedge=500):
 
-        t = np.linspace(0, linerange, linerange)
+        t = np.linspace(0, cutedge, cutedge)
         plt.figure(figsize=(16, 20))
 
         plt.subplot(3, 2, 1)
-        disease_std = df[:cutedge].std(axis=0)  
-        healthy_std = df[cutedge:].std(axis=0)
+        disease_std = df[:cutedge].std(axis=1)  
+        healthy_std = df[cutedge:].std(axis=1)
 
         sns.lineplot(x=t, y=disease_std, label='Has Disease')
         sns.lineplot(x=t, y=healthy_std, label='Healthy')
@@ -121,11 +121,11 @@ class SignalPlot:
         plt.grid(True, linestyle='--', alpha=0.7)
 
         plt.subplot(3, 2, 2)
-        disease_mean = df[:cutedge].mean(axis=0)
-        healthy_mean = df[cutedge:].mean(axis=0)
+        disease_mean = df[:cutedge].mean(axis=1)
+        healthy_mean = df[cutedge:].mean(axis=1)
 
-        disease_se = df[:cutedge].sem(axis=0)
-        healthy_se = df[cutedge:].sem(axis=0)
+        disease_se = df[:cutedge].sem(axis=1)
+        healthy_se = df[cutedge:].sem(axis=1)
 
 
         plt.plot(t, disease_mean, label='Has Disease', color='blue')
