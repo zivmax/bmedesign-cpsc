@@ -1,8 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from sklearn.model_selection import StratifiedKFold
 import numpy as np
+from .dataset import SignalDataset
 
+SEED = 42
+np.random.seed(SEED)
 class NetCore(nn.Module):
     def __init__(self, input_length, embedding_dim, kernel_sizes, num_filters, drop_out):
         super(NetCore, self).__init__()
@@ -64,7 +69,19 @@ class CNN:
               num_epochs=50,
               learning_rate=0.001,
               weight_decay=1e-5,
-              train_size=0.8,
-              early_stopping=10):
-        pass
-        
+              early_stopping=10,
+              splits=5):
+        skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=SEED)
+        fold_results = {
+            'train_loss': [],
+            'train_accuracy': [],
+            'val_loss': [],
+            'val_accuracy': []
+        }
+        for fold, (train_idx, val_idx) in enumerate(skf.split(df, target)):
+            train_dataset = SignalDataset(df, target)
+            train_loader = DataLoader(train_dataset, 
+                                  batch_size=batch_size, 
+                                  shuffle=True)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        self.model.train()
