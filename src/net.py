@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-class CNN(nn.Module):
+class NetCore(nn.Module):
     def __init__(self, input_length, embedding_dim, kernel_sizes, num_filters, drop_out):
-        super(CNN, self).__init__()
+        super(NetCore, self).__init__()
 
         self.conv_layers = nn.ModuleList([
             nn.Conv1d(in_channels=1, out_channels=num_filters, kernel_size=k)
@@ -42,6 +42,29 @@ class CNN(nn.Module):
 
         embedding = self.fc_embedding(x)
         return embedding
-
-
     
+
+class CNN:
+    def __init__(self, input_length, 
+                 embedding_dim=64, 
+                 kernel_sizes=[3, 5, 7], 
+                 num_filters=6, 
+                 drop_out=0.5,
+                 optimizer_lr=0.001,
+                 device='cuda'if torch.cuda.is_available() else 'cpu'):
+        self.device = device
+        self.embedding_dim = embedding_dim
+        self.model = NetCore(input_length, embedding_dim, kernel_sizes, num_filters, drop_out).to(self.device)
+        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.Adam(self.model.parameters(), optimizer_lr)
+
+    def train(self, df, 
+              target,
+              batch_size=64,
+              num_epochs=50,
+              learning_rate=0.001,
+              weight_decay=1e-5,
+              train_size=0.8,
+              early_stopping=10):
+        pass
+        
