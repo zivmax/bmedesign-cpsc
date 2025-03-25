@@ -181,7 +181,7 @@ class HybridModel:
 
                 combined_features = np.hstack((combined_embeddings, batch_interactions))
 
-                classifier = XGBClassifier(**self.classifier_params, **self.xgb_gpu_options)
+                classifier = XGBClassifier(**self.classifier_params, **self.xgb_gpu_options, random_state=SEED)
                 classifier.fit(combined_features, combined_labels)
                 
                 train_predictions = classifier.predict(combined_features)
