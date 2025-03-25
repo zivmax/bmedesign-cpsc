@@ -16,7 +16,7 @@ class SignalOps:
         return sig.correlate(x, y, mode='same')
     
     @staticmethod
-    def get_fft_components(signal, fs=400):
+    def fft_components(signal, fs=400):
         n = len(signal)
         fft_result = fft(signal)
         freqs = fftfreq(n, 1/fs)
@@ -28,6 +28,17 @@ class SignalOps:
         phases = np.angle(fft_result[pos_mask])
         
         return freqs, magnitudes, phases
+    
+    @staticmethod
+    def moving_average(signal, window_length=100):
+        window = np.ones(window_length) / window_length
+        return np.convolve(signal, window, mode='same')
+    
+    @staticmethod
+    def time_shift(signal, lag=400, diff=True):
+        shifted_signal = np.zeros_like(signal)
+        shifted_signal[lag:] = signal[:-lag]
+        return shifted_signal if not diff else signal - shifted_signal
         
     @staticmethod
     def bandpass_filter(signal, fs=400, lowcut=1, highcut=50, order=4):
@@ -55,10 +66,7 @@ class SignalFeatures:
         peaks, _ = sig.find_peaks(signal, height=threshold)
         return peaks
     
-    @staticmethod
-    def moving_average(signal, window_length=5):
-        window = np.ones(window_length) / window_length
-        return np.convolve(signal, window, mode='same')
+
     
 
 class SignalPlot:
@@ -164,7 +172,7 @@ class SignalPlot:
                          alpha=0.3, color='orange', label='_nolegend_')
 
         plt.title('Mean FFT result')
-        plt.xlabel('data point')
+        plt.xlabel('sample point')
         plt.ylabel('Mean FFT Result')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
@@ -189,7 +197,7 @@ class SignalPlot:
                          alpha=0.3, color='orange', label='_nolegend_')
 
         plt.title('Mean phase result')
-        plt.xlabel('data point')
+        plt.xlabel('sample point')
         plt.ylabel('Mean phase Result')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
@@ -203,7 +211,7 @@ class SignalPlot:
         sns.lineplot(x=num_points, y=healthy_fft_std, label='Healthy')
 
         plt.title('FFT std result')
-        plt.xlabel('data point')
+        plt.xlabel('sample point')
         plt.ylabel('FFT std Result')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
@@ -217,7 +225,7 @@ class SignalPlot:
         sns.lineplot(x=num_points, y=healthy_phase_std, label='Healthy')
 
         plt.title('Phase std result')
-        plt.xlabel('data point')
+        plt.xlabel('sample point')
         plt.ylabel('Phase std Result')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
