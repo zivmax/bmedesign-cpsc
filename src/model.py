@@ -8,7 +8,7 @@ import numpy as np
 from pandas import DataFrame
 from tqdm import tqdm
 import time
-from .dataset import SignalDataset
+from dataset import SignalDataset
 
 SEED = 42
 np.random.seed(SEED)
@@ -69,7 +69,6 @@ class HybridModel:
             'gpu_id': 0,                
             'predictor': 'gpu_predictor'  
         } if device == 'cuda' else {}
-
 
 
     def train(self, signal_df:DataFrame, 
@@ -181,7 +180,7 @@ class HybridModel:
 
                 combined_features = np.hstack((combined_embeddings, batch_interactions))
 
-                classifier = XGBClassifier(**self.classifier_params, **self.xgb_gpu_options)
+                classifier = XGBClassifier(**self.classifier_params, **self.xgb_gpu_options, random_state=SEED)
                 classifier.fit(combined_features, combined_labels)
                 
                 train_predictions = classifier.predict(combined_features)
