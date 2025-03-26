@@ -71,7 +71,7 @@ class SignalFeatures:
 
 class SignalPlot:
     @staticmethod
-    def fft_plot(signal, fs=400, duration=10):
+    def fft_plot(signal, fs=400, duration=10, path=None):
     
         n = len(signal)
         if duration is None:
@@ -108,14 +108,15 @@ class SignalPlot:
         plt.grid(True)
 
         plt.tight_layout()
-        plt.show()
+        plt.savefig(path) if path else plt.show()
+        
     @staticmethod
-    def statistics_plot(df:DataFrame, freq_df:DataFrame, cutedge=500):
+    def statistics_plot(df:DataFrame, cutedge=500, path=None):
 
         t = np.linspace(0, cutedge, cutedge)
-        plt.figure(figsize=(16, 20))
+        plt.figure(figsize=(16, 9))
 
-        plt.subplot(3, 2, 1)
+        plt.subplot(1, 2, 1)
         disease_std = df[:cutedge].std(axis=1)  
         healthy_std = df[cutedge:].std(axis=1)
 
@@ -128,7 +129,7 @@ class SignalPlot:
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
 
-        plt.subplot(3, 2, 2)
+        plt.subplot(1, 2, 2)
         disease_mean = df[:cutedge].mean(axis=1)
         healthy_mean = df[cutedge:].mean(axis=1)
 
@@ -150,95 +151,16 @@ class SignalPlot:
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
 
-        # ============================================================================
-        plt.subplots_adjust(hspace=0.15)
-        num_points = np.linspace(0, cutedge, cutedge)
+        plt.savefig(path) if path else plt.show()
 
-        plt.subplot(3, 2, 3)
-        disease_fft_mean = freq_df[:cutedge]['fft_mean']
-        healthy_fft_mean = freq_df[cutedge:]['fft_mean']
-
-        disease_fft_se = freq_df[:cutedge]['fft_std'] / np.sqrt(len(freq_df[:cutedge]))
-        healthy_fft_se = freq_df[cutedge:]['fft_std'] / np.sqrt(len(freq_df[cutedge:]))
-
-
-        plt.plot(num_points, disease_fft_mean, label='Has Disease', color='blue')
-        plt.plot(num_points, healthy_fft_mean, label='Healthy', color='orange')
-
-
-        plt.fill_between(num_points, disease_fft_mean-disease_fft_se, disease_fft_mean+disease_fft_se, 
-                         alpha=0.3, color='blue', label='_nolegend_')
-        plt.fill_between(num_points, healthy_fft_mean-healthy_fft_se, healthy_fft_mean+healthy_fft_se, 
-                         alpha=0.3, color='orange', label='_nolegend_')
-
-        plt.title('Mean FFT result')
-        plt.xlabel('sample point')
-        plt.ylabel('Mean FFT Result')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-
-
-        plt.subplot(3, 2, 4)
-        disease_phase_mean = freq_df[:cutedge]['phase_mean']
-        healthy_phase_mean = freq_df[cutedge:]['phase_mean']
-
-
-        disease_phase_se = freq_df[:cutedge]['phase_std'] / np.sqrt(len(freq_df[:cutedge]))
-        healthy_phase_se = freq_df[cutedge:]['phase_std'] / np.sqrt(len(freq_df[cutedge:]))
-
-
-        plt.plot(num_points, disease_phase_mean, label='Has Disease', color='blue')
-        plt.plot(num_points, healthy_phase_mean, label='Healthy', color='orange')
-
-
-        plt.fill_between(num_points, disease_phase_mean-disease_phase_se, disease_phase_mean+disease_phase_se, 
-                         alpha=0.3, color='blue', label='_nolegend_')
-        plt.fill_between(num_points, healthy_phase_mean-healthy_phase_se, healthy_phase_mean+healthy_phase_se, 
-                         alpha=0.3, color='orange', label='_nolegend_')
-
-        plt.title('Mean phase result')
-        plt.xlabel('sample point')
-        plt.ylabel('Mean phase Result')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-
-
-        plt.subplot(3, 2, 5)
-        disease_fft_std = freq_df[:cutedge]['fft_std']
-        healthy_fft_std = freq_df[cutedge:]['fft_std']
-
-        sns.lineplot(x=num_points, y=disease_fft_std, label='Has Disease')
-        sns.lineplot(x=num_points, y=healthy_fft_std, label='Healthy')
-
-        plt.title('FFT std result')
-        plt.xlabel('sample point')
-        plt.ylabel('FFT std Result')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-
-
-        plt.subplot(3, 2, 6)
-        disease_phase_std = freq_df[:cutedge]['phase_std']
-        healthy_phase_std = freq_df[cutedge:]['phase_std']
-
-        sns.lineplot(x=num_points, y=disease_phase_std, label='Has Disease')
-        sns.lineplot(x=num_points, y=healthy_phase_std, label='Healthy')
-
-        plt.title('Phase std result')
-        plt.xlabel('sample point')
-        plt.ylabel('Phase std Result')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-
-        plt.tight_layout()
-        plt.show()
     @staticmethod
     def binary_class_differential_plot(healthy:Tuple[DataFrame, DataFrame], 
                                        ill:Tuple[DataFrame, DataFrame], 
                                        duration=4000, 
                                        title='Differential Plot', 
                                        label1='origin', 
-                                       label2='transformed'):
+                                       label2='transformed',
+                                       path=None):
         healthy_origin = healthy[0]
         healthy_transformed = healthy[1]
         t = np.linspace(0, duration, duration)
@@ -282,52 +204,28 @@ class SignalPlot:
         plt.legend()
 
         plt.grid(True, linestyle='--', alpha=0.7)
-        plt.show()
+        plt.savefig(path) if path else plt.show()
     @staticmethod
-    def signal_feature_plot(df:DataFrame, cutedge=500):
+    def signal_feature_plot(df:DataFrame, cutedge=500, path=None):
         t = np.linspace(0, cutedge, cutedge)
         ill_df = df[:cutedge]
         healty_df = df[cutedge:]
-        plt.figure(figsize=(16, 12))
+        feature_list = df.columns.tolist()
+        for feature in feature_list:
+            plt.figure(figsize=(12, 8))
+            sns.lineplot(x=t, y=ill_df[feature], label='Has Disease')
+            sns.lineplot(x=t, y=healty_df[feature], label='Healthy')
+            plt.title(feature)
+            plt.xlabel('sample point')
+            plt.ylabel(feature)
+            plt.legend()
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.savefig(path + feature + '.png') if path else plt.show()
 
-        plt.subplot(2, 2, 1)
-        sns.lineplot(x=t, y=healty_df['peaks'], label='Healthy')
-        sns.lineplot(x=t, y=ill_df['peaks'], label='Has Disease')
-        plt.title('Peaks Count')
-        plt.xlabel('Sample point')
-        plt.ylabel('Count')
-        plt.grid(True, linestyle='--', alpha=0.7)
 
-        plt.subplot(2, 2, 2)
-        sns.lineplot(x=t, y=healty_df['ps_density_mean'], label='Healthy')
-        sns.lineplot(x=t, y=ill_df['ps_density_mean'], label='Has Disease')
-        plt.title('PS Density Mean')
-        plt.xlabel('sample point')
-        plt.ylabel('PS Density Mean')
-        plt.grid(True, linestyle='--', alpha=0.7)
-
-        plt.subplots_adjust(hspace=0.3)
-
-        plt.subplot(2, 2, 3)
-        sns.lineplot(x=t, y=healty_df['ps_density_std'], label='Healthy')
-        sns.lineplot(x=t, y=ill_df['ps_density_std'], label='Has Disease')
-        plt.title('PS Density Std')
-        plt.xlabel('sample point')
-        plt.ylabel('PS Density Std')
-        plt.grid(True, linestyle='--', alpha=0.7)
-
-        plt.subplot(2, 2, 4)
-        sns.lineplot(x=t, y=healty_df['entropy'], label='Healthy')
-        sns.lineplot(x=t, y=ill_df['entropy'], label='Has Disease')
-        plt.title('Entropy')
-        plt.xlabel('sample point')
-        plt.ylabel('Entropy')
-        plt.grid(True, linestyle='--', alpha=0.7)
-
-        plt.tight_layout()
-        plt.show()
     @staticmethod
-    def time_shift_diff_plot(healthy:DataFrame, ill:DataFrame, lag=80):
+    def time_shift_diff_plot(healthy:DataFrame, ill:DataFrame, lag=80, path=None):
+        
         shifted_signal = np.zeros_like(healthy)
         shifted_signal[lag:] = healthy[:-lag]
         healthy_diff = healthy - shifted_signal
@@ -352,6 +250,4 @@ class SignalPlot:
 
         plt.legend()
         plt.tight_layout()
-        plt.show()
-
-        return healthy_diff, ill_diff
+        plt.savefig(path) if path else plt.show()
