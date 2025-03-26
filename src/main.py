@@ -1,5 +1,6 @@
 from model import HybridModel
 from pipeline import LabelPipeline, InteractionPipeline
+from plot import Plots
 import pandas as pd
 import numpy as np
 
@@ -20,6 +21,8 @@ lp = LabelPipeline(train_df)
 
 labeled_train_signals, train_targets = lp.get_labeled_data()
 train_interaction_df = InteractionPipeline.get_interaction_features(labeled_train_signals)
+plots = Plots(labeled_train_signals, train_interaction_df)
+plots.random_single_sample_plots()
 
-print(train_interaction_df.head())
-model = HybridModel(cnn_params, classifier_params)
+
+# model = HybridModel(cnn_params, classifier_params)

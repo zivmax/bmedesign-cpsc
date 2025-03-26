@@ -13,16 +13,18 @@ class Plots:
         self.interaction_df = interaction_df
         self.cut_edge = cutedge
 
-    def random_single_sample_plots(self, fs=400, duration=10, moving_avg=None, lag=None):
+    def random_single_sample_plots(self, fs=400, duration=10, moving_avg=100, lag=400):
         ill_idx = random.choice(range(0, self.cut_edge[0]))
+        print(ill_idx)
         healthy_idx = random.choice(range(self.cut_edge[0], self.cut_edge[1]))
+        print(healthy_idx)
 
         ill_signal = self.labeled_df.iloc[ill_idx]
         healthy_signal = self.labeled_df.iloc[healthy_idx]
         healthy_moving_avg = SignalOps.moving_average(healthy_signal, 
-                                                      window=moving_avg)
+                                                      window_length=moving_avg)
         ill_moving_avg = SignalOps.moving_average(ill_signal, 
-                                                  window=moving_avg)
+                                                  window_length=moving_avg)
         healty_avg_tuple = (healthy_signal, healthy_moving_avg)
         ill_avg_tuple = (ill_signal, ill_moving_avg)
 
