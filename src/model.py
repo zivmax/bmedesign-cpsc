@@ -293,7 +293,7 @@ class HybridModel:
         best_model_idx = np.argmin([model['val_loss'] for model in total_fold_results['best_models']])
         best_model = total_fold_results['best_models'][best_model_idx]
         
-
+        torch.save(best_model['cnn_state'], r'src\model\best_cnn_model{}.pth'.format(time.datetime.now().strftime("%Y%m%d%H%M%S")))
         self.cnn_model.load_state_dict(best_model['cnn_state'])
         self.classifier = best_model['classifier']
         

@@ -4,8 +4,8 @@ import pandas as pd
 import numpy as np
 
 
-train_df = pd.read_csv(r'bmedesign-cpsc\data\traindata.csv')
-test_df = pd.read_csv(r'bmedesign-cpsc\data\testdata.csv')
+train_df = pd.read_csv(r'data\traindata.csv')
+test_df = pd.read_csv(r'data\traindata.csv')
 
 cnn_params = {
     'input_length':4000,
@@ -22,4 +22,4 @@ labeled_train_signals, train_targets = lp.get_labeled_data()
 train_interaction_df = InteractionPipeline.get_interaction_features(labeled_train_signals)
 
 print(train_interaction_df.head())
-# model = HybridModel(cnn_params, classifier_params)
+model = HybridModel(cnn_params, classifier_params)
