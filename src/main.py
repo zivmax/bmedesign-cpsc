@@ -1,5 +1,5 @@
 from model import HybridModel
-from pipeline import FEPipeline
+from pipeline import LabelPipeline, InteractionPipeline
 import pandas as pd
 import numpy as np
 
@@ -16,4 +16,10 @@ cnn_params = {
 }
 
 classifier_params = {}
-model = HybridModel(cnn_params, classifier_params)
+lp = LabelPipeline(train_df)
+
+labeled_train_signals, train_targets = lp.get_labeled_data()
+train_interaction_df = InteractionPipeline.get_interaction_features(labeled_train_signals)
+
+print(train_interaction_df.head())
+# model = HybridModel(cnn_params, classifier_params)

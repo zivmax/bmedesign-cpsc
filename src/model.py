@@ -1,14 +1,18 @@
 import torch
 import torch.nn as nn
+import numpy as np
 import torch.nn.functional as F
+import time
+
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedKFold
 from xgboost import XGBClassifier
-import numpy as np
 from pandas import DataFrame
 from tqdm import tqdm
-import time
+
+
 from dataset import SignalDataset
+from pipeline import InteractionPipeline as ip
 
 SEED = 42
 np.random.seed(SEED)
@@ -71,8 +75,7 @@ class HybridModel:
         } if device == 'cuda' else {}
 
 
-    def train(self, signal_df:DataFrame, 
-              interaction_df:DataFrame,
+    def train(self, signal_df:DataFrame,
               target:DataFrame,
               batch_size=64,
               num_epochs=50,
@@ -104,8 +107,9 @@ class HybridModel:
 
             X_train, y_train = signal_df.iloc[train_idx], target.iloc[train_idx]
             X_val, y_val = signal_df.iloc[val_idx], target.iloc[val_idx]
-            train_interaction = interaction_df.iloc[train_idx]
-            val_interaction = interaction_df.iloc[val_idx]
+            
+            train_interaction = ip.get_interaction_features(X_train)
+            val_interaction = ip.get_interaction_features(X_val)
 
             train_dataset = SignalDataset(X_train, y_train)
             val_dataset = SignalDataset(X_val, y_val)
