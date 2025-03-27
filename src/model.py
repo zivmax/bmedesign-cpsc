@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import time
+import datetime
 
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedKFold
@@ -10,10 +11,11 @@ from xgboost import XGBClassifier
 from pandas import DataFrame
 from tqdm import tqdm
 
-
+import warnings
 from dataset import SignalDataset
 from pipeline import InteractionPipeline as ip
 
+warnings.filterwarnings("ignore")
 SEED = 42
 np.random.seed(SEED)
 class NetCore(nn.Module):
@@ -21,7 +23,10 @@ class NetCore(nn.Module):
         super(NetCore, self).__init__()
 
         self.conv_layers = nn.ModuleList([
-            nn.Conv1d(in_channels=1, out_channels=num_filters, kernel_size=k)
+            nn.Conv1d(in_channels=1, 
+                      out_channels=num_filters, 
+                      kernel_size=k,
+                      padding=(k-1)//2)
             for k in kernel_sizes
         ])
 
@@ -69,16 +74,15 @@ class HybridModel:
         self.cnn_model = NetCore(**cnn_params).to(device)
         self.classifier_params = classifier_params
         self.xgb_gpu_options = {
-            'tree_method': 'gpu_hist',  
-            'gpu_id': 0,                
-            'predictor': 'gpu_predictor'  
-        } if device == 'cuda' else {}
+            'tree_method': 'hist',
+            'device': 'cuda' 
+        } if device == 'cuda' else {'tree_method': 'hist'}
 
 
     def train(self, signal_df:DataFrame,
               target:DataFrame,
               batch_size=64,
-              num_epochs=50,
+              num_epochs=5,
               learning_rate=0.001,
               weight_decay=1e-5,
               early_stopping=10,
@@ -151,7 +155,7 @@ class HybridModel:
                     data, label = data.to(self.device), label.to(self.device)
                     
                     optimizer.zero_grad()
-                    embeddings = cnn_model(data.unsqueeze(1))
+                    embeddings = cnn_model(data.squeeze(2))
                     
                     classifier_layer = nn.Linear(self.embedding_dim, len(torch.unique(label))).to(self.device)
                     logits = classifier_layer(embeddings)
@@ -184,7 +188,9 @@ class HybridModel:
 
                 combined_features = np.hstack((combined_embeddings, batch_interactions))
 
-                classifier = XGBClassifier(**self.classifier_params, **self.xgb_gpu_options, random_state=SEED)
+                classifier = XGBClassifier(**self.classifier_params, 
+                                           **self.xgb_gpu_options, 
+                                           random_state=SEED)
                 classifier.fit(combined_features, combined_labels)
                 
                 train_predictions = classifier.predict(combined_features)
@@ -215,7 +221,7 @@ class HybridModel:
                     for batch_idx, (data, label) in val_batch_iter:
                         data, label = data.to(self.device), label.to(self.device)
                         
-                        embeddings = cnn_model(data.unsqueeze(1))
+                        embeddings = cnn_model(data.squeeze(2))
                         
                         logits = classifier_layer(embeddings)
                         loss = F.cross_entropy(logits, label)
@@ -293,7 +299,7 @@ class HybridModel:
         best_model_idx = np.argmin([model['val_loss'] for model in total_fold_results['best_models']])
         best_model = total_fold_results['best_models'][best_model_idx]
         
-        torch.save(best_model['cnn_state'], r'src\model\best_cnn_model{}.pth'.format(time.datetime.now().strftime("%Y%m%d%H%M%S")))
+        torch.save(best_model['cnn_state'], r'src\model\best_cnn_model_{}.pth'.format(datetime.datetime.now().strftime("%Y-%m-%d-%H:%M")))
         self.cnn_model.load_state_dict(best_model['cnn_state'])
         self.classifier = best_model['classifier']
         

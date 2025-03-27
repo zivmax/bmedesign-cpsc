@@ -8,6 +8,12 @@ import numpy as np
 train_df = pd.read_csv(r'data\traindata.csv')
 test_df = pd.read_csv(r'data\traindata.csv')
 
+def generate_labeled_plots(labeled_signal_df, interaction_df):
+    plots = Plots(labeled_signal_df, interaction_df)
+    plots.random_single_sample_plots()
+    plots.interaction_df_plots()
+    plots.labeled_signal_df_plots()
+
 cnn_params = {
     'input_length':4000,
     'embedding_dim': 64,
@@ -17,12 +23,11 @@ cnn_params = {
 }
 
 classifier_params = {}
-lp = LabelPipeline(train_df)
 
+lp = LabelPipeline(train_df)
 labeled_train_signals, train_targets = lp.get_labeled_data()
 train_interaction_df = InteractionPipeline.get_interaction_features(labeled_train_signals)
-plots = Plots(labeled_train_signals, train_interaction_df)
-plots.random_single_sample_plots()
 
 
-# model = HybridModel(cnn_params, classifier_params)
+model = HybridModel(cnn_params, classifier_params)
+model.train(labeled_train_signals, train_targets)
