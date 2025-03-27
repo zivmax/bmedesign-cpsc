@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn.functional as F
 import time
 import datetime
-
+from sklearn.metrics import f1_score
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedKFold
 from xgboost import XGBClassifier
@@ -82,19 +82,19 @@ class HybridModel:
     def train(self, signal_df:DataFrame,
               target:DataFrame,
               batch_size=64,
-              num_epochs=5,
+              num_epochs=100,
               learning_rate=0.001,
               weight_decay=1e-5,
-              early_stopping=10,
+              early_stopping=20,
               splits=5,
               verbose=True):
 # ============================= initialization ===============================================
         skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=SEED)
         total_fold_results = {
             'train_loss': [],
-            'train_accuracy': [],
+            'train_f1': [],
             'val_loss': [],
-            'val_accuracy': [],
+            'val_f1': [],
             'best_models': []
         }
         fold_iter = tqdm(enumerate(skf.split(signal_df, target)) , 
@@ -123,9 +123,9 @@ class HybridModel:
 
 # ============================= training ===============================================
             fold_train_losses = []
-            fold_train_acc = []
+            fold_train_f1 = []
             fold_val_losses = []
-            fold_val_acc = []
+            fold_val_f1 = []
             best_val_loss = np.inf
             patience_counter = 0
             best_fold_model = None
@@ -194,12 +194,12 @@ class HybridModel:
                 classifier.fit(combined_features, combined_labels)
                 
                 train_predictions = classifier.predict(combined_features)
-                train_xgb_accuracy = (train_predictions == combined_labels).mean()
+                train_xgb_f1 = f1_score(combined_labels, train_predictions, average='weighted')
                 
                 train_loss = train_loss / len(train_loader)
                 train_accuracy = train_correct / train_total
                 fold_train_losses.append(train_loss)
-                fold_train_acc.append(train_xgb_accuracy)  
+                fold_train_f1.append(train_xgb_f1)  
                 
 # ============================= validation ===============================================
                 cnn_model.eval()
@@ -250,19 +250,19 @@ class HybridModel:
                 val_combined_features = np.hstack((val_embeddings, val_batch_interactions))
                 
                 val_predictions = classifier.predict(val_combined_features)
-                val_xgb_accuracy = (val_predictions == val_labels).mean()
+                val_xgb_f1 = f1_score(val_labels, val_predictions, average='weighted')
                 
                 val_loss = val_loss / len(val_loader)
                 val_accuracy = val_correct / val_total
                 fold_val_losses.append(val_loss)
-                fold_val_acc.append(val_xgb_accuracy)  
+                fold_val_f1.append(val_xgb_f1)  
                 
                 if verbose:
                     epoch_iter.set_postfix({
                         'train_loss': f"{train_loss:.4f}",
-                        'train_acc': f"{train_xgb_accuracy:.4f}",
+                        'train_f1': f"{train_xgb_f1:.4f}",
                         'val_loss': f"{val_loss:.4f}",
-                        'val_acc': f"{val_xgb_accuracy:.4f}"
+                        'val_f1': f"{val_xgb_f1:.4f}"
                     })
                 
                 if val_loss < best_val_loss:
@@ -273,7 +273,7 @@ class HybridModel:
                         'classifier': classifier,
                         'epoch': epoch,
                         'val_loss': val_loss,
-                        'val_accuracy': val_xgb_accuracy
+                        'val_f1': val_xgb_f1
                     }
                 else:
                     patience_counter += 1
@@ -284,28 +284,28 @@ class HybridModel:
                             
 # ============================= end of epoch ===============================================
             total_fold_results['train_loss'].append(fold_train_losses)
-            total_fold_results['train_accuracy'].append(fold_train_acc)
+            total_fold_results['train_f1'].append(fold_train_f1)
             total_fold_results['val_loss'].append(fold_val_losses)
-            total_fold_results['val_accuracy'].append(fold_val_acc)
+            total_fold_results['val_f1'].append(fold_val_f1)
             total_fold_results['best_models'].append(best_fold_model)
             
             fold_time = time.time() - fold_start
             if verbose:
                 tqdm.write(f"Fold {fold+1}/{splits} completed in {fold_time:.2f}s | "
                            f"Best val loss: {best_val_loss:.4f} | "
-                           f"Best val accuracy: {best_fold_model['val_accuracy']:.4f}")
+                           f"Best val F1: {best_fold_model['val_f1']:.4f}")
         
 # ============================= model selection ===============================================
         best_model_idx = np.argmin([model['val_loss'] for model in total_fold_results['best_models']])
         best_model = total_fold_results['best_models'][best_model_idx]
         
-        torch.save(best_model['cnn_state'], r'src\model\best_cnn_model_{}.pth'.format(datetime.datetime.now().strftime("%Y-%m-%d-%H:%M")))
+        torch.save(best_model['cnn_state'], r'src\model\best_cnn_model_{}.pth'.format(datetime.datetime.now().strftime("%Y.%m.%d_%H.%M")))
         self.cnn_model.load_state_dict(best_model['cnn_state'])
         self.classifier = best_model['classifier']
         
         if verbose:
             print(f"\nTraining completed. Best model from fold {best_model_idx+1} with "
                   f"validation loss: {best_model['val_loss']:.4f} and "
-                  f"validation accuracy: {best_model['val_accuracy']:.4f}")
+                  f"validation F1: {best_model['val_f1']:.4f}")
         
         return total_fold_results
