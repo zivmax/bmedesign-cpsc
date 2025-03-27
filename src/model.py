@@ -85,8 +85,8 @@ class HybridModel:
               num_epochs=100,
               learning_rate=0.001,
               weight_decay=1e-5,
-              early_stopping=20,
-              splits=5,
+              early_stopping=50,
+              splits=8,
               verbose=True):
 # ============================= initialization ===============================================
         skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=SEED)
