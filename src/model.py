@@ -18,6 +18,7 @@ from pipeline import InteractionPipeline as ip
 warnings.filterwarnings("ignore")
 SEED = 42
 np.random.seed(SEED)
+
 class NetCore(nn.Module):
     def __init__(self, input_length, embedding_dim, kernel_sizes, num_filters, drop_out):
         super(NetCore, self).__init__()
@@ -60,7 +61,6 @@ class NetCore(nn.Module):
 
         embedding = self.fc_embedding(x)
         return embedding
-    
 
 class HybridModel:
     def __init__(self, 
@@ -78,17 +78,17 @@ class HybridModel:
             'device': 'cuda' 
         } if device == 'cuda' else {'tree_method': 'hist'}
 
-
     def train(self, signal_df:DataFrame,
               target:DataFrame,
-              batch_size=64,
+              batch_size=128,
               num_epochs=100,
               learning_rate=0.001,
               weight_decay=1e-5,
-              early_stopping=50,
-              splits=8,
-              verbose=True):
-# ============================= initialization ===============================================
+              early_stopping=30,
+              splits=5,
+              verbose=True,
+              model_save_path=r'src\model\best_cnn_model_{}.pth'.format(
+                  datetime.datetime.now().strftime("%Y.%m.%d_%H.%M"))):
         skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=SEED)
         total_fold_results = {
             'train_loss': [],
@@ -105,12 +105,18 @@ class HybridModel:
         for fold, (train_idx, val_idx) in fold_iter:
             fold_start = time.time()
             cnn_model = NetCore(**self.cnn_params).to(self.device)
-            optimizer = torch.optim.Adam(cnn_model.parameters(),
+            n_classes = len(np.unique(target.iloc[train_idx]))
+            classifier_layer = nn.Linear(self.embedding_dim, n_classes).to(self.device)
+            criterion = nn.CrossEntropyLoss()
+            optimizer = torch.optim.Adam(list(cnn_model.parameters()) + list(classifier_layer.parameters()),
                                          learning_rate,
                                          weight_decay=weight_decay)
 
             X_train, y_train = signal_df.iloc[train_idx], target.iloc[train_idx]
             X_val, y_val = signal_df.iloc[val_idx], target.iloc[val_idx]
+
+            X_train = X_train.sample(frac=1, random_state=SEED).reset_index(drop=True)
+            y_train = y_train.sample(frac=1, random_state=SEED).reset_index(drop=True)
             
             train_interaction = ip.get_interaction_features(X_train)
             val_interaction = ip.get_interaction_features(X_val)
@@ -119,9 +125,8 @@ class HybridModel:
             val_dataset = SignalDataset(X_val, y_val)
 
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
-# ============================= training ===============================================
             fold_train_losses = []
             fold_train_f1 = []
             fold_val_losses = []
@@ -137,13 +142,12 @@ class HybridModel:
             
             for epoch in epoch_iter:
                 cnn_model.train()
+                classifier_layer.train()
                 train_loss = 0.0
                 train_correct = 0
                 train_total = 0
-                
-                all_train_embeddings = []
-                all_train_labels = []
-                train_batch_indices = []
+                train_preds = []
+                train_labels_list = []
                 
                 batch_iter = tqdm(enumerate(train_loader), 
                                   total=len(train_loader),
@@ -153,63 +157,37 @@ class HybridModel:
                 
                 for batch_idx, (data, label) in batch_iter:
                     data, label = data.to(self.device), label.to(self.device)
-                    
                     optimizer.zero_grad()
+
                     embeddings = cnn_model(data.squeeze(2))
-                    
-                    classifier_layer = nn.Linear(self.embedding_dim, len(torch.unique(label))).to(self.device)
                     logits = classifier_layer(embeddings)
-                    loss = F.cross_entropy(logits, label)
+                    loss = criterion(logits, label)
                     loss.backward()
                     optimizer.step()
-                    
-                    all_train_embeddings.append(embeddings.detach().cpu().numpy())
-                    all_train_labels.append(label.cpu().numpy())
-
-                    start_idx = batch_idx * batch_size
-                    end_idx = min(start_idx + batch_size, len(train_idx))
-                    train_batch_indices.extend(range(start_idx, end_idx))
 
                     train_loss += loss.item()
                     _, predicted = torch.max(logits.data, 1)
                     train_total += label.size(0)
                     train_correct += (predicted == label).sum().item()
+                    train_preds.extend(predicted.cpu().numpy())
+                    train_labels_list.extend(label.cpu().numpy())
                     
-                    batch_iter.set_postfix({
-                        'loss': f"{loss.item():.4f}",
-                    }) if verbose else None
-                
-                combined_embeddings = np.vstack(all_train_embeddings)
-                combined_labels = np.concatenate(all_train_labels)
-                
+                    if verbose:
+                        batch_iter.set_postfix({'loss': f"{loss.item():.4f}"})
 
-                batch_interactions = train_interaction.iloc[train_batch_indices].values
-                
-
-                combined_features = np.hstack((combined_embeddings, batch_interactions))
-
-                classifier = XGBClassifier(**self.classifier_params, 
-                                           **self.xgb_gpu_options, 
-                                           random_state=SEED)
-                classifier.fit(combined_features, combined_labels)
-                
-                train_predictions = classifier.predict(combined_features)
-                train_xgb_f1 = f1_score(combined_labels, train_predictions, average='weighted')
-                
-                train_loss = train_loss / len(train_loader)
+                train_loss /= len(train_loader)
                 train_accuracy = train_correct / train_total
+                f1_train = f1_score(train_labels_list, train_preds, average='weighted')
                 fold_train_losses.append(train_loss)
-                fold_train_f1.append(train_xgb_f1)  
-                
-# ============================= validation ===============================================
+                fold_train_f1.append(f1_train)
+
                 cnn_model.eval()
+                classifier_layer.eval()
                 val_loss = 0.0
                 val_correct = 0
                 val_total = 0
-                
-                all_val_embeddings = []
-                all_val_labels = []
-                val_batch_indices = []
+                val_preds = []
+                val_labels_list = []
                 
                 val_batch_iter = tqdm(enumerate(val_loader), 
                                       total=len(val_loader),
@@ -220,49 +198,30 @@ class HybridModel:
                 with torch.no_grad():
                     for batch_idx, (data, label) in val_batch_iter:
                         data, label = data.to(self.device), label.to(self.device)
-                        
                         embeddings = cnn_model(data.squeeze(2))
-                        
                         logits = classifier_layer(embeddings)
-                        loss = F.cross_entropy(logits, label)
-                        
-                        all_val_embeddings.append(embeddings.cpu().numpy())
-                        all_val_labels.append(label.cpu().numpy())
-                        
-                        start_idx = batch_idx * batch_size
-                        end_idx = min(start_idx + batch_size, len(val_idx))
-                        val_batch_indices.extend(range(start_idx, end_idx))
-                        
+                        loss = criterion(logits, label)
                         val_loss += loss.item()
                         _, predicted = torch.max(logits.data, 1)
                         val_total += label.size(0)
                         val_correct += (predicted == label).sum().item()
-                        
-                        val_batch_iter.set_postfix({
-                            'loss': f"{loss.item():.4f}",
-                        }) if verbose else None
-                
-                val_embeddings = np.vstack(all_val_embeddings)
-                val_labels = np.concatenate(all_val_labels)
-                
-                val_batch_interactions = val_interaction.iloc[val_batch_indices].values
-                
-                val_combined_features = np.hstack((val_embeddings, val_batch_interactions))
-                
-                val_predictions = classifier.predict(val_combined_features)
-                val_xgb_f1 = f1_score(val_labels, val_predictions, average='weighted')
-                
-                val_loss = val_loss / len(val_loader)
+                        val_preds.extend(predicted.cpu().numpy())
+                        val_labels_list.extend(label.cpu().numpy())
+                        if verbose:
+                            val_batch_iter.set_postfix({'loss': f"{loss.item():.4f}"})
+
+                val_loss /= len(val_loader)
                 val_accuracy = val_correct / val_total
+                f1_val = f1_score(val_labels_list, val_preds, average='weighted')
                 fold_val_losses.append(val_loss)
-                fold_val_f1.append(val_xgb_f1)  
-                
+                fold_val_f1.append(f1_val)
+
                 if verbose:
                     epoch_iter.set_postfix({
                         'train_loss': f"{train_loss:.4f}",
-                        'train_f1': f"{train_xgb_f1:.4f}",
+                        'train_f1': f"{f1_train:.4f}",
                         'val_loss': f"{val_loss:.4f}",
-                        'val_f1': f"{val_xgb_f1:.4f}"
+                        'val_f1': f"{f1_val:.4f}"
                     })
                 
                 if val_loss < best_val_loss:
@@ -270,10 +229,10 @@ class HybridModel:
                     patience_counter = 0
                     best_fold_model = {
                         'cnn_state': cnn_model.state_dict(),
-                        'classifier': classifier,
+                        'classifier_layer': classifier_layer.state_dict(),
                         'epoch': epoch,
                         'val_loss': val_loss,
-                        'val_f1': val_xgb_f1
+                        'val_f1': f1_val
                     }
                 else:
                     patience_counter += 1
@@ -281,31 +240,70 @@ class HybridModel:
                         if verbose:
                             tqdm.write(f"Early stopping at epoch {epoch+1}")
                         break
-                            
-# ============================= end of epoch ===============================================
+
+            cnn_model.load_state_dict(best_fold_model['cnn_state'])
+            classifier_layer.load_state_dict(best_fold_model['classifier_layer'])
+            cnn_model.eval()
+            classifier_layer.eval()
+
+            train_dataset_full = SignalDataset(X_train, y_train)
+            val_dataset_full = SignalDataset(X_val, y_val)
+            train_loader_full = DataLoader(train_dataset_full, batch_size=batch_size, shuffle=False)
+            val_loader_full = DataLoader(val_dataset_full, batch_size=batch_size, shuffle=False)
+
+            train_embeddings = []
+            train_labels_all = []
+            for data, label in train_loader_full:
+                data = data.to(self.device)
+                with torch.no_grad():
+                    e = cnn_model(data.squeeze(2)).cpu().numpy()
+                train_embeddings.append(e)
+                train_labels_all.append(label.numpy())
+            train_embeddings = np.vstack(train_embeddings)
+            train_labels_all = np.concatenate(train_labels_all)
+            train_feats = train_interaction.values
+            train_combined = np.hstack((train_embeddings, train_feats))
+            classifier = XGBClassifier(**self.classifier_params,
+                                       **self.xgb_gpu_options,
+                                       random_state=SEED)
+            classifier.fit(train_combined, train_labels_all)
+
+            val_embeddings = []
+            val_labels_all = []
+            for data, label in val_loader_full:
+                data = data.to(self.device)
+                with torch.no_grad():
+                    e = cnn_model(data.squeeze(2)).cpu().numpy()
+                val_embeddings.append(e)
+                val_labels_all.append(label.numpy())
+            val_embeddings = np.vstack(val_embeddings)
+            val_labels_all = np.concatenate(val_labels_all)
+            val_feats = val_interaction.values
+            val_combined = np.hstack((val_embeddings, val_feats))
+            val_preds = classifier.predict(val_combined)
+            val_xgb_f1 = f1_score(val_labels_all, val_preds, average='weighted')
+
             total_fold_results['train_loss'].append(fold_train_losses)
             total_fold_results['train_f1'].append(fold_train_f1)
             total_fold_results['val_loss'].append(fold_val_losses)
             total_fold_results['val_f1'].append(fold_val_f1)
+            best_fold_model['classifier'] = classifier
+            best_fold_model['val_xgb_f1'] = val_xgb_f1
             total_fold_results['best_models'].append(best_fold_model)
             
             fold_time = time.time() - fold_start
             if verbose:
                 tqdm.write(f"Fold {fold+1}/{splits} completed in {fold_time:.2f}s | "
-                           f"Best val loss: {best_val_loss:.4f} | "
-                           f"Best val F1: {best_fold_model['val_f1']:.4f}")
-        
-# ============================= model selection ===============================================
+                           f"Mean train loss: {np.mean(fold_train_losses):.4f} | "
+                           f"Mean train F1: {np.mean(fold_train_f1):.4f} | "
+                           f"Mean val loss: {np.mean(fold_val_losses):.4f} | "
+                           f"Mean val F1: {np.mean(fold_val_f1):.4f}")
+
         best_model_idx = np.argmin([model['val_loss'] for model in total_fold_results['best_models']])
         best_model = total_fold_results['best_models'][best_model_idx]
         
-        torch.save(best_model['cnn_state'], r'src\model\best_cnn_model_{}.pth'.format(datetime.datetime.now().strftime("%Y.%m.%d_%H.%M")))
+        torch.save(best_model['cnn_state'], model_save_path) if model_save_path else None
         self.cnn_model.load_state_dict(best_model['cnn_state'])
         self.classifier = best_model['classifier']
-        
-        if verbose:
-            print(f"\nTraining completed. Best model from fold {best_model_idx+1} with "
-                  f"validation loss: {best_model['val_loss']:.4f} and "
-                  f"validation F1: {best_model['val_f1']:.4f}")
-        
+
         return total_fold_results

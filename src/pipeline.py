@@ -18,11 +18,15 @@ class LabelPipeline:
             self.main_df.iloc[0:self.cut_edge[0], -1] = 1
             self.main_df.iloc[self.cut_edge[0]:self.cut_edge[1], 
                               -1] = 0
+            # Fix: distribution leak
+            self.labeled_df = self.main_df[:self.cut_edge[1]].sample(frac=1, random_state=42).reset_index(drop=True)
+            self.labeled_target_df = self.labeled_df['target']
             self.target_df = self.main_df['target']
             self.main_df = self.main_df.drop('target', axis=1)
+            self.labeled_df = self.labeled_df.drop('target', axis=1)
 
     def get_labeled_data(self):
-        return self.main_df[:self.cut_edge[1]], self.target_df[:self.cut_edge[1]] if self.cut_edge else None
+        return self.labeled_df, self.labeled_target_df if self.cut_edge else None
     
     def get_total_target(self):
         return self.target_df

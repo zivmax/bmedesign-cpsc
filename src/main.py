@@ -30,4 +30,4 @@ train_interaction_df = InteractionPipeline.get_interaction_features(labeled_trai
 
 
 model = HybridModel(cnn_params, classifier_params)
-model.train(labeled_train_signals, train_targets)
+model.train(labeled_train_signals, train_targets, model_save_path=None)
