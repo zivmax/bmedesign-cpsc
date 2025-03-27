@@ -10,6 +10,7 @@ from sklearn.model_selection import StratifiedKFold
 from xgboost import XGBClassifier
 from pandas import DataFrame
 from tqdm import tqdm
+from sklearn.utils import shuffle
 
 import warnings
 from dataset import SignalDataset
@@ -115,8 +116,8 @@ class HybridModel:
             X_train, y_train = signal_df.iloc[train_idx], target.iloc[train_idx]
             X_val, y_val = signal_df.iloc[val_idx], target.iloc[val_idx]
 
-            X_train = X_train.sample(frac=1, random_state=SEED).reset_index(drop=True)
-            y_train = y_train.sample(frac=1, random_state=SEED).reset_index(drop=True)
+            X_train, y_train = shuffle(X_train, y_train, random_state=SEED)
+            X_val, y_val = shuffle(X_val, y_val, random_state=SEED)
             
             train_interaction = ip.get_interaction_features(X_train)
             val_interaction = ip.get_interaction_features(X_val)
@@ -259,6 +260,7 @@ class HybridModel:
                     e = cnn_model(data.squeeze(2)).cpu().numpy()
                 train_embeddings.append(e)
                 train_labels_all.append(label.numpy())
+
             train_embeddings = np.vstack(train_embeddings)
             train_labels_all = np.concatenate(train_labels_all)
             train_feats = train_interaction.values
