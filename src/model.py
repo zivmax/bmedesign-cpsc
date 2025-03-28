@@ -11,8 +11,8 @@ from xgboost import XGBClassifier
 from pandas import DataFrame
 from tqdm import tqdm
 from sklearn.utils import shuffle
+import warnings          
 
-import warnings
 from dataset import SignalDataset
 from pipeline import InteractionPipeline
 
@@ -91,8 +91,10 @@ class HybridModel:
         skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=SEED)
         total_fold_results = {
             'train_loss': [],
+            'train_accuracy': [],
             'train_f1': [],
             'val_loss': [],
+            'val_accuracy': [],
             'val_f1': [],
             'best_models': []
         }
@@ -134,6 +136,8 @@ class HybridModel:
 
             fold_train_losses = []
             fold_train_f1 = []
+            fold_train_accuracy = []
+            fold_val_accuracy = []
             fold_val_losses = []
             fold_val_f1 = []
             best_val_loss = np.inf
@@ -186,6 +190,8 @@ class HybridModel:
                 f1_train = f1_score(train_labels_list, train_preds, average='weighted')
                 fold_train_losses.append(train_loss)
                 fold_train_f1.append(f1_train)
+                fold_train_accuracy.append(train_accuracy)
+
 
                 cnn_model.eval()
                 classifier_layer.eval()
@@ -221,6 +227,8 @@ class HybridModel:
                 f1_val = f1_score(val_labels_list, val_preds, average='weighted')
                 fold_val_losses.append(val_loss)
                 fold_val_f1.append(f1_val)
+                fold_val_accuracy.append(val_accuracy)
+
 
                 if verbose:
                     epoch_iter.set_postfix({
@@ -292,7 +300,12 @@ class HybridModel:
             val_xgb_f1 = f1_score(val_labels_all, val_preds, average='weighted')
 
             total_fold_results['train_loss'].append(fold_train_losses)
+            total_fold_results['train_accuracy'].append(train_accuracy)
+
+            
             total_fold_results['train_f1'].append(fold_train_f1)
+            total_fold_results['val_accuracy'].append(val_accuracy)
+            
             total_fold_results['val_loss'].append(fold_val_losses)
             total_fold_results['val_f1'].append(fold_val_f1)
             best_fold_model['classifier'] = classifier
@@ -302,10 +315,10 @@ class HybridModel:
             fold_time = time.time() - fold_start
             if verbose:
                 tqdm.write(f"Fold {fold+1}/{splits} completed in {fold_time:.2f}s | "
-                           f"Mean train loss: {np.mean(fold_train_losses):.4f} | "
-                           f"Mean train F1: {np.mean(fold_train_f1):.4f} | "
-                           f"Mean val loss: {np.mean(fold_val_losses):.4f} | "
-                           f"Mean val F1: {np.mean(fold_val_f1):.4f}")
+                           f"Mean train accuracy: {np.mean(fold_train_accuracy):.3f} | "
+                           f"Mean train F1: {np.mean(fold_train_f1):.3f} | "
+                            f"Mean val accuracy: {np.mean(fold_val_accuracy):.3f} | "
+                           f"Mean val F1: {np.mean(fold_val_f1):.3f}")
 
 # ============================ Model selection ==================================
         best_model_idx = np.argmin([model['val_loss'] for model in total_fold_results['best_models']])
@@ -315,6 +328,7 @@ class HybridModel:
         self.cnn_model.load_state_dict(best_model['cnn_state'])
         self.classifier = best_model['classifier']
 
+        ## TODO: plot train and val loss and f1 score
         return total_fold_results
     
     def evaluate(self, X_test, y_test, batch_size=32):
@@ -340,14 +354,14 @@ class HybridModel:
         test_embeddings = np.vstack(test_embeddings)
         test_labels = np.concatenate(test_labels)
 
-        # Combine with interaction features
         test_feats = test_interaction.values
         test_combined = np.hstack((test_embeddings, test_feats))
 
-        # Get predictions
         test_preds = self.classifier.predict(test_combined)
 
-        # Calculate metrics
+        # NOTE: test the evaluation here
+        # test_preds = np.zeros_like(test_preds) 
+
         f1 = f1_score(test_labels, test_preds, average='weighted')
 
         return {
@@ -355,3 +369,5 @@ class HybridModel:
             'predictions': test_preds,
             'true_labels': test_labels
         }
+
+

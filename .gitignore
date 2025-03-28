@@ -4,3 +4,4 @@ _pycache_
 *.pyc
 *.png
 *.pth
+src/localtest.py

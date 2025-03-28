@@ -40,20 +40,19 @@ class SignalAugmentationPipeline:
                  labeled_target_df:pd.DataFrame):
         pass
 
+# NOTE: sklearn pipeline structure
 class InteractionPipeline:
     def __init__(self):
         self.scaler = MinMaxScaler()
         self.is_fitted = False
         
     def fit(self, raw_df:pd.DataFrame):
-        """Fit the scaler on training data"""
         interaction_df = self._extract_features(raw_df)
         self.scaler.fit(interaction_df)
         self.is_fitted = True
         return self
         
     def transform(self, raw_df:pd.DataFrame):
-        """Transform data using the fitted scaler"""
         if not self.is_fitted:
             raise ValueError("Scaler not fitted. Call fit() first.")
         interaction_df = self._extract_features(raw_df)
@@ -61,12 +60,10 @@ class InteractionPipeline:
                            columns=interaction_df.columns)
     
     def fit_transform(self, raw_df:pd.DataFrame):
-        """Fit and transform in one step for training data"""
         self.fit(raw_df)
         return self.transform(raw_df)
     
     def _extract_features(self, raw_df:pd.DataFrame):
-        """Extract features without scaling"""
         interaction_df = pd.DataFrame()
         main_df = raw_df.copy()
         interaction_df['mean'] = main_df.mean(axis=1)
