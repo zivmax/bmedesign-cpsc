@@ -115,12 +115,9 @@ class HybridModel:
                                          weight_decay=weight_decay)
 
 # =============================== preprocessing ==================================
-            # Fix: shuffle data before splitting
             X_train, y_train = signal_df.iloc[train_idx], target.iloc[train_idx]
             X_val, y_val = signal_df.iloc[val_idx], target.iloc[val_idx]
 
-            # X_train, y_train = shuffle(X_train, y_train, random_state=SEED)
-            # X_val, y_val = shuffle(X_val, y_val, random_state=SEED)
             # Fix: same scaling for train and val
             ip = InteractionPipeline()
             ip.fit(X_train)
@@ -131,8 +128,8 @@ class HybridModel:
             train_dataset = SignalDataset(X_train, y_train)
             val_dataset = SignalDataset(X_val, y_val)
 
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
             fold_train_losses = []
             fold_train_f1 = []
@@ -261,14 +258,14 @@ class HybridModel:
             cnn_model.eval()
             classifier_layer.eval()
 
-            train_dataset_full = SignalDataset(X_train, y_train)
-            val_dataset_full = SignalDataset(X_val, y_val)
-            train_loader_full = DataLoader(train_dataset_full, batch_size=batch_size, shuffle=False)
-            val_loader_full = DataLoader(val_dataset_full, batch_size=batch_size, shuffle=False)
+            # train_dataset_full = SignalDataset(X_train, y_train)
+            # val_dataset_full = SignalDataset(X_val, y_val)
+            # train_loader_full = DataLoader(train_dataset_full, batch_size=batch_size, shuffle=False)
+            # val_loader_full = DataLoader(val_dataset_full, batch_size=batch_size, shuffle=False)
 
             train_embeddings = []
             train_labels_all = []
-            for data, label in train_loader_full:
+            for data, label in train_loader:
                 data = data.to(self.device)
                 with torch.no_grad():
                     e = cnn_model(data.squeeze(2)).cpu().numpy()
@@ -286,7 +283,7 @@ class HybridModel:
 
             val_embeddings = []
             val_labels_all = []
-            for data, label in val_loader_full:
+            for data, label in val_loader:
                 data = data.to(self.device)
                 with torch.no_grad():
                     e = cnn_model(data.squeeze(2)).cpu().numpy()
