@@ -12,6 +12,10 @@ from pandas import DataFrame
 from tqdm import tqdm
 from sklearn.utils import shuffle
 import warnings          
+import matplotlib.pyplot as plt
+import seaborn
+import scikitplot as skplot
+import pandas as pd
 
 from dataset import SignalDataset
 from pipeline import InteractionPipeline
@@ -327,10 +331,17 @@ class HybridModel:
         self.classifier = best_model['classifier']
         self.ip = best_model['pipeline']
 
-        ## TODO: plot train and val loss and f1 score
+        self.total_fold_results = total_fold_results
         return total_fold_results
     
-    def evaluate(self, X_test, y_test, batch_size=32):
+    ## TODO: plot train and val loss and f1 score
+    def train_process_plot(self):
+        
+        pass
+         
+
+    
+    def evaluate(self, X_test, y_test, batch_size=32, plot=True):
         """Evaluate model on unseen test data"""
         self.cnn_model.eval()
 
@@ -356,15 +367,21 @@ class HybridModel:
         test_feats = test_interaction.values
         test_combined = np.hstack((test_embeddings, test_feats))
 
-        test_preds = self.classifier.predict(test_combined)
+        test_preds = self.classifier.predict_proba(test_combined)
 
         # NOTE: test the evaluation here
         # test_preds = np.zeros_like(test_preds) 
 
-        f1 = f1_score(test_labels, test_preds, average='weighted')
+        # f1 = f1_score(test_labels, test_preds, average='weighted')
+        print(y_test.shape, test_preds.shape)
+        if plot:
+            skplot.metrics.plot_precision_recall_curve(y_test, test_preds, 
+                                                   title="Precision-Recall Curve",
+                                                   cmap='Blues')
+            plt.savefig(r'src\imgs\precision_recall_curve.png')
 
         return {
-            'f1': f1,
+            # 'f1': f1,
             'predictions': test_preds,
             'true_labels': test_labels
         }
