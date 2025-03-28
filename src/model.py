@@ -14,7 +14,7 @@ from sklearn.utils import shuffle
 
 import warnings
 from dataset import SignalDataset
-from pipeline import InteractionPipeline as ip
+from pipeline import InteractionPipeline
 
 warnings.filterwarnings("ignore")
 SEED = 42
@@ -67,10 +67,8 @@ class HybridModel:
     def __init__(self, 
                  cnn_params,
                  classifier_params,
-                 embedding_dim=64, 
                  device='cuda'if torch.cuda.is_available() else 'cpu'):
-        self.device = device
-        self.embedding_dim = embedding_dim
+        self.device = device 
         self.cnn_params = cnn_params
         self.cnn_model = NetCore(**cnn_params).to(device)
         self.classifier_params = classifier_params
@@ -102,25 +100,31 @@ class HybridModel:
                          total=splits, 
                          desc="Folds", 
                          position=0) if verbose else enumerate(skf.split(signal_df, target))
-
+        self.ip = InteractionPipeline()
+        self.ip.fit(signal_df)  
         for fold, (train_idx, val_idx) in fold_iter:
             fold_start = time.time()
             cnn_model = NetCore(**self.cnn_params).to(self.device)
             n_classes = len(np.unique(target.iloc[train_idx]))
-            classifier_layer = nn.Linear(self.embedding_dim, n_classes).to(self.device)
+            classifier_layer = nn.Linear(self.cnn_params['embedding_dim'], n_classes).to(self.device)
             criterion = nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(list(cnn_model.parameters()) + list(classifier_layer.parameters()),
                                          learning_rate,
                                          weight_decay=weight_decay)
 
+# =============================== preprocessing ==================================
+            # Fix: shuffle data before splitting
             X_train, y_train = signal_df.iloc[train_idx], target.iloc[train_idx]
             X_val, y_val = signal_df.iloc[val_idx], target.iloc[val_idx]
 
-            X_train, y_train = shuffle(X_train, y_train, random_state=SEED)
-            X_val, y_val = shuffle(X_val, y_val, random_state=SEED)
-            
-            train_interaction = ip.get_interaction_features(X_train)
-            val_interaction = ip.get_interaction_features(X_val)
+            # X_train, y_train = shuffle(X_train, y_train, random_state=SEED)
+            # X_val, y_val = shuffle(X_val, y_val, random_state=SEED)
+            # Fix: same scaling for train and val
+            ip = InteractionPipeline()
+            ip.fit(X_train)
+
+            train_interaction = ip.transform(X_train)
+            val_interaction = ip.transform(X_val)
 
             train_dataset = SignalDataset(X_train, y_train)
             val_dataset = SignalDataset(X_val, y_val)
@@ -140,7 +144,8 @@ class HybridModel:
                               desc=f"Fold {fold+1} Epochs", 
                               position=1, 
                               leave=False) if verbose else range(num_epochs)
-            
+# ============================= epoch training ====================================
+
             for epoch in epoch_iter:
                 cnn_model.train()
                 classifier_layer.train()
@@ -195,7 +200,7 @@ class HybridModel:
                                       desc='Validation', 
                                       position=2, 
                                       leave=False) if verbose else enumerate(val_loader)
-                
+# ============================= validation ========================================
                 with torch.no_grad():
                     for batch_idx, (data, label) in val_batch_iter:
                         data, label = data.to(self.device), label.to(self.device)
@@ -242,6 +247,7 @@ class HybridModel:
                             tqdm.write(f"Early stopping at epoch {epoch+1}")
                         break
 
+# ============================ XGB embedding ==================================
             cnn_model.load_state_dict(best_fold_model['cnn_state'])
             classifier_layer.load_state_dict(best_fold_model['classifier_layer'])
             cnn_model.eval()
@@ -301,6 +307,7 @@ class HybridModel:
                            f"Mean val loss: {np.mean(fold_val_losses):.4f} | "
                            f"Mean val F1: {np.mean(fold_val_f1):.4f}")
 
+# ============================ Model selection ==================================
         best_model_idx = np.argmin([model['val_loss'] for model in total_fold_results['best_models']])
         best_model = total_fold_results['best_models'][best_model_idx]
         
@@ -309,3 +316,42 @@ class HybridModel:
         self.classifier = best_model['classifier']
 
         return total_fold_results
+    
+    def evaluate(self, X_test, y_test, batch_size=32):
+        """Evaluate model on unseen test data"""
+        self.cnn_model.eval()
+
+        test_dataset = SignalDataset(X_test, y_test)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+        
+        test_interaction = self.ip.transform(X_test) if self.ip else ValueError("InteractionPipeline not fitted. Call fit() first.")
+
+        test_embeddings = []
+        test_labels = []
+
+        with torch.no_grad():
+            for data, label in test_loader:
+                data = data.to(self.device)
+                embeddings = self.cnn_model(data.squeeze(2)).cpu().numpy()
+                test_embeddings.append(embeddings)
+                test_labels.append(label.numpy())
+
+        test_embeddings = np.vstack(test_embeddings)
+        test_labels = np.concatenate(test_labels)
+
+        # Combine with interaction features
+        test_feats = test_interaction.values
+        test_combined = np.hstack((test_embeddings, test_feats))
+
+        # Get predictions
+        test_preds = self.classifier.predict(test_combined)
+
+        # Calculate metrics
+        f1 = f1_score(test_labels, test_preds, average='weighted')
+
+        return {
+            'f1': f1,
+            'predictions': test_preds,
+            'true_labels': test_labels
+        }

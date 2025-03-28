@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 
 NPERSEG = 1024
+SEED = 42
 class LabelPipeline:
     def __init__(self, df:pd.DataFrame, cutedge:Tuple=(500, 1000)):
         self.main_df = df.copy()
@@ -18,24 +19,54 @@ class LabelPipeline:
             self.main_df.iloc[0:self.cut_edge[0], -1] = 1
             self.main_df.iloc[self.cut_edge[0]:self.cut_edge[1], 
                               -1] = 0
-            # Fix: distribution leak
-            self.labeled_df = self.main_df[:self.cut_edge[1]].sample(frac=1, random_state=42).reset_index(drop=True)
+            # shuffle only the labeled part of the data
+            self.labeled_df = self.main_df[:self.cut_edge[1]].sample(frac=1, random_state=SEED).reset_index(drop=True)
             self.labeled_target_df = self.labeled_df['target']
+
             self.target_df = self.main_df['target']
             self.main_df = self.main_df.drop('target', axis=1)
             self.labeled_df = self.labeled_df.drop('target', axis=1)
 
     def get_labeled_data(self):
-        return self.labeled_df, self.labeled_target_df if self.cut_edge else None
+        # Fix: return none if cut_edge is not set
+        return (self.labeled_df, self.labeled_target_df) if self.cut_edge else None
     
-    def get_total_target(self):
-        return self.target_df
-    
+    def get_raw_data(self):
+        return self.target_df if self.cut_edge else None, self.main_df
+
+
+class SignalAugmentationPipeline:
+    def __init__(self, labeled_df:pd.DataFrame,
+                 labeled_target_df:pd.DataFrame):
+        pass
 
 class InteractionPipeline:
+    def __init__(self):
+        self.scaler = MinMaxScaler()
+        self.is_fitted = False
+        
+    def fit(self, raw_df:pd.DataFrame):
+        """Fit the scaler on training data"""
+        interaction_df = self._extract_features(raw_df)
+        self.scaler.fit(interaction_df)
+        self.is_fitted = True
+        return self
+        
+    def transform(self, raw_df:pd.DataFrame):
+        """Transform data using the fitted scaler"""
+        if not self.is_fitted:
+            raise ValueError("Scaler not fitted. Call fit() first.")
+        interaction_df = self._extract_features(raw_df)
+        return pd.DataFrame(self.scaler.transform(interaction_df), 
+                           columns=interaction_df.columns)
     
-    @staticmethod    
-    def get_interaction_features(raw_df:pd.DataFrame, scaler=MinMaxScaler()):
+    def fit_transform(self, raw_df:pd.DataFrame):
+        """Fit and transform in one step for training data"""
+        self.fit(raw_df)
+        return self.transform(raw_df)
+    
+    def _extract_features(self, raw_df:pd.DataFrame):
+        """Extract features without scaling"""
         interaction_df = pd.DataFrame()
         main_df = raw_df.copy()
         interaction_df['mean'] = main_df.mean(axis=1)
@@ -46,8 +77,5 @@ class InteractionPipeline:
             lambda x: SignalFeatures.ps_density(x, nperseg=NPERSEG)[1].mean(), axis=1)
         interaction_df['ps_density_std'] = main_df.apply(
             lambda x: SignalFeatures.ps_density(x, nperseg=NPERSEG)[1].std(), axis=1)
-
-        interaction_df = pd.DataFrame(scaler.fit_transform(interaction_df), 
-                                           columns=interaction_df.columns)
         return interaction_df
         

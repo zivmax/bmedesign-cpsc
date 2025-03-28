@@ -1,33 +1,42 @@
 from model import HybridModel
 from pipeline import LabelPipeline, InteractionPipeline
-from plot import Plots
+from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
 
-
+# Load data
 train_df = pd.read_csv(r'data\traindata.csv')
-test_df = pd.read_csv(r'data\traindata.csv')
+test_df = pd.read_csv(r'data\testdata.csv')
 
-def generate_labeled_plots(labeled_signal_df, interaction_df):
-    plots = Plots(labeled_signal_df, interaction_df)
-    plots.random_single_sample_plots()
-    plots.interaction_df_plots()
-    plots.labeled_signal_df_plots()
+# Get labeled data
+lp = LabelPipeline(train_df)
+labeled_signals, targets = lp.get_labeled_data()
+
+
+X_train_val, X_test, y_train_val, y_test = train_test_split(
+    labeled_signals, targets, test_size=0.2, 
+    random_state=42, stratify=targets
+)
+
 
 cnn_params = {
-    'input_length':4000,
-    'embedding_dim': 64,
-    'kernel_sizes': [3, 5, 7],
-    'num_filters': 128,
-    'drop_out': 0.5,
+    'input_length': 4000,
+    'embedding_dim': 800,
+    'kernel_sizes': [1],
+    'num_filters': 2,
+    'drop_out': 0.9,
 }
-
 classifier_params = {}
-
-lp = LabelPipeline(train_df)
-labeled_train_signals, train_targets = lp.get_labeled_data()
-train_interaction_df = InteractionPipeline.get_interaction_features(labeled_train_signals)
 
 
 model = HybridModel(cnn_params, classifier_params)
-model.train(labeled_train_signals, train_targets, model_save_path=None)
+cv_results = model.train(
+    X_train_val, y_train_val,
+    num_epochs=2,
+    batch_size=12,
+    model_save_path='best_model.pth'
+)
+
+
+test_results = model.evaluate(X_test, y_test)
+print(f"Test F1 Score: {test_results['f1']:.4f}")
