@@ -12,10 +12,10 @@ class SignalDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        return len(self.data)
+        return len(self.signals)
 
     def __getitem__(self, idx):
-        sample = self.data[idx]
+        sample = self.signals[idx]
         target = self.targets[idx] if self.targets is not None else None
 
         if self.transform:
