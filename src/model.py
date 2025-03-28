@@ -102,8 +102,8 @@ class HybridModel:
                          total=splits, 
                          desc="Folds", 
                          position=0) if verbose else enumerate(skf.split(signal_df, target))
-        self.ip = InteractionPipeline()
-        self.ip.fit(signal_df)  
+        # self.ip = InteractionPipeline()
+        # self.ip.fit(signal_df)  
         for fold, (train_idx, val_idx) in fold_iter:
             fold_start = time.time()
             cnn_model = NetCore(**self.cnn_params).to(self.device)
@@ -310,6 +310,7 @@ class HybridModel:
             total_fold_results['val_f1'].append(fold_val_f1)
             best_fold_model['classifier'] = classifier
             best_fold_model['val_xgb_f1'] = val_xgb_f1
+            best_fold_model['pipeline'] = ip
             total_fold_results['best_models'].append(best_fold_model)
             
             fold_time = time.time() - fold_start
@@ -321,12 +322,13 @@ class HybridModel:
                            f"Mean val F1: {np.mean(fold_val_f1):.3f}")
 
 # ============================ Model selection ==================================
-        best_model_idx = np.argmin([model['val_loss'] for model in total_fold_results['best_models']])
+        best_model_idx = np.argmax([model['val_xgb_f1'] for model in total_fold_results['best_models']])
         best_model = total_fold_results['best_models'][best_model_idx]
         
         torch.save(best_model['cnn_state'], model_save_path) if model_save_path else None
         self.cnn_model.load_state_dict(best_model['cnn_state'])
         self.classifier = best_model['classifier']
+        self.ip = best_model['pipeline']
 
         ## TODO: plot train and val loss and f1 score
         return total_fold_results
