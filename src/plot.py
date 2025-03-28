@@ -2,8 +2,9 @@ import pandas as pd
 from typing import Tuple
 from utils import SignalPlot, SignalOps
 import random
+import os
 
-BASE_PATH = r"src\imgs"
+BASE_PATH = r"src/imgs/signal_overview"
 class Plots:
     def __init__(self, labeled_df: pd.DataFrame, 
                  interaction_df: pd.DataFrame,
@@ -14,10 +15,11 @@ class Plots:
         self.cut_edge = cutedge
 
     def random_single_sample_plots(self, fs=400, duration=10, moving_avg=100, lag=400):
+
+        if not os.path.exists(BASE_PATH):
+            os.makedirs(BASE_PATH)
         ill_idx = random.choice(range(0, self.cut_edge[0]))
-        print(ill_idx)
         healthy_idx = random.choice(range(self.cut_edge[0], self.cut_edge[1]))
-        print(healthy_idx)
 
         ill_signal = self.labeled_df.iloc[ill_idx]
         healthy_signal = self.labeled_df.iloc[healthy_idx]
@@ -46,4 +48,4 @@ class Plots:
         
     def interaction_df_plots(self, cutedge=500):
         SignalPlot.signal_feature_plot(self.interaction_df, cutedge=cutedge,
-                                path=BASE_PATH + '/interaction_features/')
+                                path='src/imgs/interaction_features/')

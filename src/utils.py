@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pandas import DataFrame
 from typing import Tuple
+import os
 
 class SignalOps:
     @staticmethod
@@ -207,6 +208,8 @@ class SignalPlot:
         plt.savefig(path) if path else plt.show()
     @staticmethod
     def signal_feature_plot(df:DataFrame, cutedge=500, path=None):
+        if not os.path.exists(path):
+            os.makedirs(path)
         t = np.linspace(0, cutedge, cutedge)
         ill_df = df[:cutedge]
         healty_df = df[cutedge:]

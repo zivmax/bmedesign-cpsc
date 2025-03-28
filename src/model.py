@@ -13,10 +13,10 @@ from tqdm import tqdm
 from sklearn.utils import shuffle
 import warnings          
 import matplotlib.pyplot as plt
-import seaborn
+import seaborn as sns
 import scikitplot as skplot
 import pandas as pd
-
+import os
 from dataset import SignalDataset
 from pipeline import InteractionPipeline
 
@@ -335,12 +335,34 @@ class HybridModel:
         return total_fold_results
     
     ## TODO: plot train and val loss and f1 score
-    def train_process_plot(self):
-        
-        pass
-         
-
+    def train_process_plot(self, save=True):
     
+        plt.figure(figsize=(12, 6))
+        total_fold_results = self.total_fold_results
+        plt.subplot(1, 2, 1)
+        for idx, loss in enumerate(total_fold_results['train_loss']):
+            sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} train_loss'.format(idx+1))
+        plt.title('Train Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.subplot(1, 2, 2)
+        for idx, loss in enumerate(total_fold_results['val_loss']):
+            sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} val_loss'.format(idx+1))
+        plt.title('Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/train_val_loss.png')
+        else:
+            plt.show()
+        plt.close('all')
+        
+         
     def evaluate(self, X_test, y_test, batch_size=32, plot=True):
         """Evaluate model on unseen test data"""
         self.cnn_model.eval()
@@ -367,21 +389,25 @@ class HybridModel:
         test_feats = test_interaction.values
         test_combined = np.hstack((test_embeddings, test_feats))
 
-        test_preds = self.classifier.predict_proba(test_combined)
+        test_preds = self.classifier.predict_proba(test_combined) if plot else self.classifier.predict(test_combined)
 
         # NOTE: test the evaluation here
         # test_preds = np.zeros_like(test_preds) 
 
-        # f1 = f1_score(test_labels, test_preds, average='weighted')
-        print(y_test.shape, test_preds.shape)
         if plot:
+            plt.figure(figsize=(10, 8))
             skplot.metrics.plot_precision_recall_curve(y_test, test_preds, 
                                                    title="Precision-Recall Curve",
-                                                   cmap='Blues')
-            plt.savefig(r'src\imgs\precision_recall_curve.png')
-
+                                                   cmap='viridis')
+            plt.grid(True, linestyle='--', alpha=0.7)
+            BASE_PATH = r'src/imgs/evaluation/'
+            if not os.path.exists(os.path.dirname(BASE_PATH)):
+                os.makedirs(os.path.dirname(BASE_PATH))
+            plt.savefig(BASE_PATH + r'precision_recall_curve.png')
+            plt.close('all')
+            
         return {
-            # 'f1': f1,
+            'f1': f1_score(test_labels, test_preds, average='weighted') if not plot else None,
             'predictions': test_preds,
             'true_labels': test_labels
         }
