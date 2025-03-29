@@ -42,6 +42,8 @@ class SignalAugmentationPipeline:
         self.labeled_target_df = labeled_target_df
         self.total_labeled_df = self.labeled_df.copy()
         self.total_target_df = self.labeled_target_df.copy()
+        self._apply_moving_avg()
+        self._apply_time_shift()
     
     def _apply_moving_avg(self, window_length=100):
         moving_avg_df = self.labeled_df.apply(
