@@ -333,7 +333,6 @@ class HybridModel:
         self.total_fold_results = total_fold_results
         return total_fold_results
     
-    ## TODO: plot train and val loss and f1 score
     def train_process_plot(self, save=True):
 # ============================ train and val loss ============================
         plt.figure(figsize=(12, 6))

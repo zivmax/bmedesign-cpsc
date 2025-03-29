@@ -34,11 +34,34 @@ class LabelPipeline:
     def get_raw_data(self):
         return self.target_df if self.cut_edge else None, self.main_df
 
-# TODO: implement this class
+# TODO: test this class
 class SignalAugmentationPipeline:
     def __init__(self, labeled_df:pd.DataFrame,
                  labeled_target_df:pd.DataFrame):
-        pass
+        self.labeled_df = labeled_df
+        self.labeled_target_df = labeled_target_df
+        self.total_labeled_df = self.labeled_df.copy()
+        self.total_target_df = self.labeled_target_df.copy()
+    
+    def _apply_moving_avg(self, window_length=100):
+        moving_avg_df = self.labeled_df.apply(
+            lambda x: SignalOps.moving_average(x, window_length), axis=1)
+        moving_avg_target_df = self.labeled_target_df.copy()
+        self.labeled_df = pd.concat([self.labeled_df, moving_avg_df], axis=0)
+
+        self.labeled_target_df = pd.concat([self.labeled_target_df, 
+                                          moving_avg_target_df], axis=0)
+
+    
+    def _apply_time_shift(self, lag=400, diff=True):
+        time_shift_df = self.labeled_df.apply(
+            lambda x: SignalOps.time_shift(x, lag, diff), axis=1)
+        time_shift_target_df = self.labeled_target_df.copy()
+        self.labeled_df = pd.concat([self.labeled_df, time_shift_df], axis=0)
+        self.labeled_target_df = pd.concat([self.labeled_target_df,
+                                            time_shift_target_df], axis=0)
+    def get_processed_data(self):
+        return self.labeled_df, self.labeled_target_df
 
 # NOTE: sklearn pipeline structure
 class InteractionPipeline:
