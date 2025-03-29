@@ -106,8 +106,7 @@ class HybridModel:
                          total=splits, 
                          desc="Folds", 
                          position=0) if verbose else enumerate(skf.split(signal_df, target))
-        # self.ip = InteractionPipeline()
-        # self.ip.fit(signal_df)  
+
         for fold, (train_idx, val_idx) in fold_iter:
             fold_start = time.time()
             cnn_model = NetCore(**self.cnn_params).to(self.device)
@@ -301,11 +300,11 @@ class HybridModel:
             val_xgb_f1 = f1_score(val_labels_all, val_preds, average='weighted')
 
             total_fold_results['train_loss'].append(fold_train_losses)
-            total_fold_results['train_accuracy'].append(train_accuracy)
+            total_fold_results['train_accuracy'].append(fold_train_accuracy)
 
             
             total_fold_results['train_f1'].append(fold_train_f1)
-            total_fold_results['val_accuracy'].append(val_accuracy)
+            total_fold_results['val_accuracy'].append(fold_val_accuracy)
             
             total_fold_results['val_loss'].append(fold_val_losses)
             total_fold_results['val_f1'].append(fold_val_f1)
@@ -336,7 +335,7 @@ class HybridModel:
     
     ## TODO: plot train and val loss and f1 score
     def train_process_plot(self, save=True):
-    
+# ============================ train and val loss ============================
         plt.figure(figsize=(12, 6))
         total_fold_results = self.total_fold_results
         plt.subplot(1, 2, 1)
@@ -353,6 +352,8 @@ class HybridModel:
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
         plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
         if save:
             BASE_PATH = r"src/imgs/training"
             if not os.path.exists(BASE_PATH):
@@ -360,7 +361,31 @@ class HybridModel:
             plt.savefig(BASE_PATH + r'/train_val_loss.png')
         else:
             plt.show()
-        plt.close('all')
+# ============================= train and val f1 score ============================
+        plt.figure(figsize=(12, 6))
+        plt.subplot(1, 2, 1)
+        for idx, f1 in enumerate(total_fold_results['train_f1']):
+            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1))
+        plt.title('Train F1 Score')
+        plt.xlabel('Epochs')
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.subplot(1, 2, 2)
+        for idx, f1 in enumerate(total_fold_results['val_f1']):
+            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} val_f1'.format(idx+1))
+        plt.title('Validation F1 Score')
+        plt.xlabel('Epochs')
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/train_val_f1.png')
+        else:
+            plt.show()
         
          
     def evaluate(self, X_test, y_test, batch_size=32, plot=True):
