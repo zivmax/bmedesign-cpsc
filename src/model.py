@@ -79,7 +79,7 @@ class HybridModel:
         self.xgb_gpu_options = {
             'tree_method': 'hist',
             'device': 'cuda' 
-        } if device == 'cuda' else {'tree_method': 'hist'}
+        } if device == 'cuda' else {'tree_method': 'approx'}
 
     def train(self, signal_df:DataFrame,
               target:DataFrame,
@@ -131,8 +131,8 @@ class HybridModel:
             train_dataset = SignalDataset(X_train, y_train)
             val_dataset = SignalDataset(X_val, y_val)
 
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
             fold_train_losses = []
             fold_train_f1 = []
@@ -333,7 +333,7 @@ class HybridModel:
         self.total_fold_results = total_fold_results
         return total_fold_results
     
-    def train_process_plot(self, save=True):
+    def train_process_plot(self, save=True, val_loss_log=False):
 # ============================ train and val loss ============================
         plt.figure(figsize=(12, 6))
         total_fold_results = self.total_fold_results
@@ -344,9 +344,14 @@ class HybridModel:
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
         plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
         plt.subplot(1, 2, 2)
-        for idx, loss in enumerate(total_fold_results['val_loss']):
-            sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} val_loss'.format(idx+1))
+        if val_loss_log:
+            for idx, loss in enumerate(total_fold_results['val_loss']):
+                sns.lineplot(x=range(len(loss)), y=np.log(loss), label='Fold{} val_log_loss'.format(idx+1))
+        else:
+            for idx, loss in enumerate(total_fold_results['val_loss']):
+                sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} val_loss'.format(idx+1))
         plt.title('Validation Loss')
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
@@ -369,6 +374,7 @@ class HybridModel:
         plt.xlabel('Epochs')
         plt.ylabel('F1 Score')
         plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
         plt.subplot(1, 2, 2)
         for idx, f1 in enumerate(total_fold_results['val_f1']):
             sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} val_f1'.format(idx+1))
@@ -386,16 +392,15 @@ class HybridModel:
         else:
             plt.show()
         
-         
     def evaluate(self, X_test, y_test, batch_size=32, plot=True):
-        """Evaluate model on unseen test data"""
+
         self.cnn_model.eval()
 
         test_dataset = SignalDataset(X_test, y_test)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
         
-        test_interaction = self.ip.transform(X_test) if self.ip else ValueError("InteractionPipeline not fitted. Call fit() first.")
+        test_interaction = self.ip.transform(X_test) if self.ip else ValueError("InteractionPipeline not fitted. Call train() first.")
 
         test_embeddings = []
         test_labels = []
@@ -431,6 +436,7 @@ class HybridModel:
             plt.close('all')
             
         return {
+            # NOTE: only when not plot, binary classification can  be used for f1_score
             'f1': f1_score(test_labels, test_preds, average='weighted') if not plot else None,
             'predictions': test_preds,
             'true_labels': test_labels

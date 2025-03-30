@@ -37,25 +37,25 @@ class LabelPipeline:
 # TODO: test this class
 class SignalAugmentationPipeline:
     def __init__(self, labeled_df:pd.DataFrame,
-                 labeled_target_df:pd.DataFrame):
+                 labeled_target_df:pd.DataFrame,
+                 window_length=80, lag=200, diff=True):
         self.labeled_df = labeled_df
         self.labeled_target_df = labeled_target_df
-        self.final_labeled_df = self.labeled_df.copy()
-        self.final_labeled_target_df = self.labeled_target_df.copy()
-        self._apply_moving_avg()
-        self._apply_time_shift()
+        self.final_labeled_df = pd.DataFrame()
+        self.final_labeled_target_df = pd.DataFrame()
+        self._apply_moving_avg(window_length)
+        self._apply_time_shift(lag, diff)
     
-    def _apply_moving_avg(self, window_length=100):
+    def _apply_moving_avg(self, window_length):
         moving_avg_df = self.labeled_df.apply(
             lambda x: SignalOps.moving_average(x, window_length), axis=0)
-        print(moving_avg_df.shape)
         moving_avg_target_df = self.labeled_target_df.copy()
         self.final_labeled_df = pd.concat([self.final_labeled_df, moving_avg_df], axis=0)
 
         self.final_labeled_target_df = pd.concat([self.final_labeled_target_df, 
                                           moving_avg_target_df], axis=0)
 
-    def _apply_time_shift(self, lag=400, diff=True):
+    def _apply_time_shift(self, lag, diff):
         time_shift_df = self.labeled_df.apply(
             lambda x: SignalOps.time_shift(x, lag, diff), axis=0)
 
@@ -63,7 +63,11 @@ class SignalAugmentationPipeline:
         self.final_labeled_df = pd.concat([self.final_labeled_df, time_shift_df], axis=0)
         self.final_labeled_target_df = pd.concat([self.final_labeled_target_df,
                                             time_shift_target_df], axis=0)
-        
+
+    def get_total_labeled_data(self):
+        return pd.concat([self.final_labeled_df,
+                          self.labeled_df]), pd.concat([self.final_labeled_target_df,
+                                                        self.labeled_target_df])
     def get_processed_data(self):
         return self.final_labeled_df, self.final_labeled_target_df
 
