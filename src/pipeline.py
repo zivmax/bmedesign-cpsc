@@ -34,11 +34,11 @@ class LabelPipeline:
     def get_raw_data(self):
         return self.target_df if self.cut_edge else None, self.main_df
 
-# TODO: test this class
+
 class SignalAugmentationPipeline:
     def __init__(self, labeled_df:pd.DataFrame,
                  labeled_target_df:pd.DataFrame,
-                 window_length=80, lag=200, diff=True):
+                 window_length=40, lag=20, diff=True):
         self.labeled_df = labeled_df
         self.labeled_target_df = labeled_target_df
         self.final_labeled_df = pd.DataFrame()

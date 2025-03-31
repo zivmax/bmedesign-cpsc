@@ -87,7 +87,7 @@ class HybridModel:
               num_epochs=100,
               learning_rate=0.001,
               weight_decay=1e-5,
-              early_stopping=30,
+              early_stopping=50,
               splits=5,
               verbose=True,
               model_save_path=r'src\model\best_cnn_model_{}.pth'.format(
@@ -418,14 +418,15 @@ class HybridModel:
         test_feats = test_interaction.values
         test_combined = np.hstack((test_embeddings, test_feats))
 
-        test_preds = self.classifier.predict_proba(test_combined) if plot else self.classifier.predict(test_combined)
+        test_preds_proba = self.classifier.predict_proba(test_combined) 
+        test_preds = self.classifier.predict(test_combined)
 
         # NOTE: test the evaluation here
         # test_preds = np.zeros_like(test_preds) 
 
         if plot:
             plt.figure(figsize=(10, 8))
-            skplot.metrics.plot_precision_recall_curve(y_test, test_preds, 
+            skplot.metrics.plot_precision_recall_curve(y_test, test_preds_proba, 
                                                    title="Precision-Recall Curve",
                                                    cmap='viridis')
             plt.grid(True, linestyle='--', alpha=0.7)
@@ -436,8 +437,7 @@ class HybridModel:
             plt.close('all')
             
         return {
-            # NOTE: only when not plot, binary classification can  be used for f1_score
-            'f1': f1_score(test_labels, test_preds, average='weighted') if not plot else None,
+            'f1': f1_score(test_labels, test_preds, average='weighted'),
             'predictions': test_preds,
             'true_labels': test_labels
         }
