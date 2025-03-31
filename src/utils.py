@@ -7,9 +7,6 @@ import seaborn as sns
 from pandas import DataFrame
 from typing import Tuple
 import os
-from deepchecks.tabular import Dataset
-from deepchecks.tabular.checks import TrainTestFeatureDrift, DataLeakage
-from deepchecks.tabular.suites import data_integrity
 
 class SignalOps:
     @staticmethod
@@ -257,26 +254,3 @@ class SignalPlot:
         plt.legend()
         plt.tight_layout()
         plt.savefig(path) if path else plt.show()
-
-
-# TODO: test this class
-class Check:
-    @staticmethod
-    def check_leakage_with_deepchecks(X_train, X_test, y_train, y_test):
-        
-        train_ds = Dataset(X_train, label=y_train)
-        test_ds = Dataset(X_test, label=y_test)
-
-        
-        leakage_check = DataLeakage()
-        leakage_result = leakage_check.run(train_ds, test_ds)
-
-        
-        drift_check = TrainTestFeatureDrift()
-        drift_result = drift_check.run(train_ds, test_ds)
-
-        
-        integrity_suite = data_integrity()
-        suite_result = integrity_suite.run(train_ds, test_ds)
-
-        return leakage_result, drift_result, suite_result

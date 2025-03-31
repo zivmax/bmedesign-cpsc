@@ -5,3 +5,5 @@ _pycache_
 *.png
 *.pth
 src/localtest.py
+*.html
+src/test_checks.ipynb
