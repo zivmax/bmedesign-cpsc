@@ -5,7 +5,7 @@ from scipy.fft import fft, fftfreq
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pandas import DataFrame
-from typing import Tuple
+from typing import Tuple, List
 import os
 
 class SignalOps:
@@ -42,12 +42,9 @@ class SignalOps:
         return shifted_signal if not diff else signal - shifted_signal
         
     @staticmethod
-    def bandpass_filter(signal, fs=400, lowcut=1, highcut=50, order=4):
-        nyq = 0.5 * fs
-        low = lowcut / nyq
-        high = highcut / nyq
-        b, a = sig.butter(order, [low, high], btype='band')
-        return sig.filtfilt(b, a, signal)
+    def add_noise(signal, noise_factor=0.1):
+        noise = np.random.normal(0, noise_factor, size=signal.shape)
+        return signal + noise
     
 
 class SignalFeatures:
@@ -254,3 +251,31 @@ class SignalPlot:
         plt.legend()
         plt.tight_layout()
         plt.savefig(path) if path else plt.show()
+
+
+class ModelEval:
+    @staticmethod
+    def comparison_acc(results:List[np.array]):
+
+        if not results or len(results) < 2:
+            return {"error": "Need at least two prediction arrays to compare"}
+
+        first_len = len(results[0])
+        if not all(len(arr) == first_len for arr in results):
+            return {"error": "All prediction arrays must have the same length"}
+
+        reference = results[0]
+        all_agree = np.ones(first_len, dtype=bool)
+
+        for result in results[1:]:
+            all_agree &= (result == reference)
+
+        total_samples = first_len
+        agreement_count = np.sum(all_agree)
+        agreement_percentage = (agreement_count / total_samples) * 100
+
+        return {
+            "total_samples": total_samples,
+            "agreement_count": int(agreement_count),
+            "agreement_percentage": float(agreement_percentage)
+        }

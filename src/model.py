@@ -83,9 +83,9 @@ class HybridModel:
 
     def train(self, signal_df:DataFrame,
               target:DataFrame,
-              batch_size=128,
-              num_epochs=100,
-              learning_rate=0.001,
+              batch_size=32,
+              num_epochs=200,
+              learning_rate=0.0015,
               weight_decay=1e-5,
               early_stopping=50,
               splits=5,
@@ -441,5 +441,26 @@ class HybridModel:
             'predictions': test_preds,
             'true_labels': test_labels
         }
+    
+    def predict(self, X):
+        self.cnn_model.eval()
+        
+        # Convert input data to tensor
+        X_tensor = torch.tensor(X.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+        
+        # Process all data at once
+        with torch.no_grad():
+            embeddings = self.cnn_model(X_tensor).cpu().numpy()
+            
+        # Process with interaction pipeline
+        interaction = self.ip.transform(X) if self.ip else ValueError("InteractionPipeline not fitted. Call train() first.")
+        interaction_feats = interaction.values
+        
+        # Combine CNN embeddings with interaction features
+        combined = np.hstack((embeddings, interaction_feats))
+        
+        # Make predictions
+        predictions = self.classifier.predict(combined)
+        return predictions
 
 
