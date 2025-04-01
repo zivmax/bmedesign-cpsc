@@ -4,7 +4,7 @@ from utils import SignalPlot, SignalOps
 import random
 import os
 
-BASE_PATH = r"src/imgs/signal_overview"
+
 class Plots:
     def __init__(self, labeled_df: pd.DataFrame, 
                  interaction_df: pd.DataFrame,
@@ -14,10 +14,11 @@ class Plots:
         self.interaction_df = interaction_df
         self.cut_edge = cutedge
 
-    def random_single_sample_plots(self, fs=400, duration=10, moving_avg=100, lag=400):
+    def random_single_sample_plots(self, fs=400, duration=10, moving_avg=100, lag=400, 
+                                   base_path = r"src/imgs/signal_overview"):
 
-        if not os.path.exists(BASE_PATH):
-            os.makedirs(BASE_PATH)
+        if not os.path.exists(base_path):
+            os.makedirs(base_path)
         ill_idx = random.choice(range(0, self.cut_edge[0]))
         healthy_idx = random.choice(range(self.cut_edge[0], self.cut_edge[1]))
 
@@ -32,20 +33,24 @@ class Plots:
 
 
         SignalPlot.fft_plot(ill_signal, fs=fs, duration=duration, 
-                            path=BASE_PATH + '/fft_ill.png')
+                            path=base_path + '/fft_ill.png')
         SignalPlot.fft_plot(healthy_signal, fs=fs, duration=duration, 
-                            path=BASE_PATH + '/fft_healthy.png')
+                            path=base_path + '/fft_healthy.png')
 
         SignalPlot.time_shift_diff_plot(healthy_signal, ill_signal, lag=lag, 
-                                        path=BASE_PATH + '/time_shift_diff.png')
+                                        path=base_path + '/time_shift_diff.png')
 
         SignalPlot.binary_class_differential_plot(healty_avg_tuple, ill_avg_tuple,
-                                                path=BASE_PATH + '/moving_avg_diff.png')
+                                                path=base_path + '/moving_avg_diff.png')
     
-    def labeled_signal_df_plots(self, cutedge=500):
+    def labeled_signal_df_plots(self, cutedge=500, base_path = r"src/imgs/signal_overview"):
+        if not os.path.exists(base_path):
+            os.makedirs(base_path)
         SignalPlot.statistics_plot(self.labeled_df, cutedge=cutedge,
-                                path=BASE_PATH + '/signal_statistics.png')
+                                path=base_path + '/signal_statistics.png')
         
-    def interaction_df_plots(self, cutedge=500):
+    def interaction_df_plots(self, cutedge=500, path='src/imgs/interaction_features/'):
+        if not os.path.exists(path):
+            os.makedirs(path)
         SignalPlot.signal_feature_plot(self.interaction_df, cutedge=cutedge,
-                                path='src/imgs/interaction_features/')
+                                path=path)
