@@ -171,9 +171,12 @@ class HybridModel:
 
                     embeddings = cnn_model(data.squeeze(2))
                     logits = classifier_layer(embeddings)
+                    if label.dim() > 1:
+                        label = label.squeeze(1)  # Ensure label is 1D for CrossEntropyLoss
                     loss = criterion(logits, label)
                     loss.backward()
                     optimizer.step()
+
 
                     train_loss += loss.item()
                     _, predicted = torch.max(logits.data, 1)
@@ -211,6 +214,10 @@ class HybridModel:
                     for batch_idx, (data, label) in val_batch_iter:
                         data, label = data.to(self.device), label.to(self.device)
                         embeddings = cnn_model(data.squeeze(2))
+
+                        if label.dim() > 1:
+                            label = label.squeeze(1)
+
                         logits = classifier_layer(embeddings)
                         loss = criterion(logits, label)
                         val_loss += loss.item()
@@ -335,7 +342,7 @@ class HybridModel:
     
     def train_process_plot(self, save=True, val_loss_log=False):
 # ============================ train and val loss ============================
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 12))
         total_fold_results = self.total_fold_results
         plt.subplot(1, 2, 1)
         for idx, loss in enumerate(total_fold_results['train_loss']):
@@ -366,7 +373,7 @@ class HybridModel:
         else:
             plt.show()
 # ============================= train and val f1 score ============================
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 12))
         plt.subplot(1, 2, 1)
         for idx, f1 in enumerate(total_fold_results['train_f1']):
             sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1))
