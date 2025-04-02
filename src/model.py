@@ -343,7 +343,7 @@ class HybridModel:
     
     def train_process_plot(self, save=True, val_loss_log=False):
 # ============================ train and val loss ============================
-        plt.figure(figsize=(20,))
+        plt.figure(figsize=(16,6))
         total_fold_results = self.total_fold_results
         plt.subplot(1, 2, 1)
         for idx, loss in enumerate(total_fold_results['train_loss']):
@@ -374,7 +374,7 @@ class HybridModel:
         else:
             plt.show()
 # ============================= train and val f1 score ============================
-        plt.figure(figsize=(20, 6))
+        plt.figure(figsize=(16, 6))
         plt.subplot(1, 2, 1)
         for idx, f1 in enumerate(total_fold_results['train_f1']):
             sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1))
