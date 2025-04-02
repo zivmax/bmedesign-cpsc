@@ -87,7 +87,7 @@ class HybridModel:
               num_epochs=200,
               learning_rate=0.0015,
               weight_decay=1e-5,
-              early_stopping=50,
+              early_stopping=None,
               splits=5,
               verbose=True,
               model_save_path=r'src\model\best_cnn_model_{}.pth'.format(
@@ -106,6 +106,7 @@ class HybridModel:
                          total=splits, 
                          desc="Folds", 
                          position=0) if verbose else enumerate(skf.split(signal_df, target))
+        stopping_thershold = np.inf if not early_stopping else early_stopping
 
         for fold, (train_idx, val_idx) in fold_iter:
             fold_start = time.time()
@@ -257,7 +258,7 @@ class HybridModel:
                     }
                 else:
                     patience_counter += 1
-                    if patience_counter >= early_stopping:
+                    if patience_counter >= stopping_thershold:
                         if verbose:
                             tqdm.write(f"Early stopping at epoch {epoch+1}")
                         break
@@ -342,7 +343,7 @@ class HybridModel:
     
     def train_process_plot(self, save=True, val_loss_log=False):
 # ============================ train and val loss ============================
-        plt.figure(figsize=(12, 12))
+        plt.figure(figsize=(20,))
         total_fold_results = self.total_fold_results
         plt.subplot(1, 2, 1)
         for idx, loss in enumerate(total_fold_results['train_loss']):
@@ -373,7 +374,7 @@ class HybridModel:
         else:
             plt.show()
 # ============================= train and val f1 score ============================
-        plt.figure(figsize=(12, 12))
+        plt.figure(figsize=(20, 6))
         plt.subplot(1, 2, 1)
         for idx, f1 in enumerate(total_fold_results['train_f1']):
             sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1))
