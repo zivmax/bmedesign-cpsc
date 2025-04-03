@@ -22,6 +22,7 @@ from pipeline import InteractionPipeline
 
 warnings.filterwarnings("ignore")
 SEED = 42
+PALETTE = 'coolwarm'
 np.random.seed(SEED)
 
 class NetCore(nn.Module):
@@ -341,13 +342,14 @@ class HybridModel:
         self.total_fold_results = total_fold_results
         return total_fold_results
     
-    def train_process_plot(self, save=True, val_loss_log=False):
+    def train_process_plot(self, save=True, val_loss_log=False, filter_coeff=None):
 # ============================ train and val loss ============================
         plt.figure(figsize=(16,6))
         total_fold_results = self.total_fold_results
         plt.subplot(1, 2, 1)
         for idx, loss in enumerate(total_fold_results['train_loss']):
-            sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} train_loss'.format(idx+1))
+            sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} train_loss'.format(idx+1),
+                         palette=PALETTE)
         plt.title('Train Loss')
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
@@ -356,10 +358,16 @@ class HybridModel:
         plt.subplot(1, 2, 2)
         if val_loss_log:
             for idx, loss in enumerate(total_fold_results['val_loss']):
-                sns.lineplot(x=range(len(loss)), y=np.log(loss), label='Fold{} val_log_loss'.format(idx+1))
+                if filter_coeff:
+                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
+                sns.lineplot(x=range(len(loss)), y=np.log(loss), label='Fold{} val_log_loss'.format(idx+1),
+                             palette=PALETTE)
         else:
             for idx, loss in enumerate(total_fold_results['val_loss']):
-                sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} val_loss'.format(idx+1))
+                if filter_coeff:
+                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
+                sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} val_loss'.format(idx+1),
+                             palette=PALETTE)
         plt.title('Validation Loss')
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
@@ -377,7 +385,8 @@ class HybridModel:
         plt.figure(figsize=(16, 6))
         plt.subplot(1, 2, 1)
         for idx, f1 in enumerate(total_fold_results['train_f1']):
-            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1))
+            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1),
+                         palette=PALETTE)
         plt.title('Train F1 Score')
         plt.xlabel('Epochs')
         plt.ylabel('F1 Score')
@@ -385,7 +394,8 @@ class HybridModel:
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.subplot(1, 2, 2)
         for idx, f1 in enumerate(total_fold_results['val_f1']):
-            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} val_f1'.format(idx+1))
+            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} val_f1'.format(idx+1),
+                         palette=PALETTE)
         plt.title('Validation F1 Score')
         plt.xlabel('Epochs')
         plt.ylabel('F1 Score')
@@ -436,7 +446,7 @@ class HybridModel:
             plt.figure(figsize=(10, 8))
             skplot.metrics.plot_precision_recall_curve(y_test, test_preds_proba, 
                                                    title="Precision-Recall Curve",
-                                                   cmap='viridis')
+                                                   cmap=PALETTE)
             plt.grid(True, linestyle='--', alpha=0.7)
             BASE_PATH = r'src/imgs/evaluation/'
             if not os.path.exists(os.path.dirname(BASE_PATH)):
