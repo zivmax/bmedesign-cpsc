@@ -23,6 +23,7 @@ from pipeline import InteractionPipeline
 warnings.filterwarnings("ignore")
 SEED = 42
 PALETTE = 'coolwarm'
+ALPHA = 0.5
 np.random.seed(SEED)
 
 class NetCore(nn.Module):
@@ -349,7 +350,7 @@ class HybridModel:
         plt.subplot(1, 2, 1)
         for idx, loss in enumerate(total_fold_results['train_loss']):
             sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} train_loss'.format(idx+1),
-                         palette=PALETTE)
+                         palette=PALETTE, alpha=ALPHA)
         plt.title('Train Loss')
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
@@ -361,13 +362,13 @@ class HybridModel:
                 if filter_coeff:
                     loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
                 sns.lineplot(x=range(len(loss)), y=np.log(loss), label='Fold{} val_log_loss'.format(idx+1),
-                             palette=PALETTE)
+                             palette=PALETTE,alpha=ALPHA)
         else:
             for idx, loss in enumerate(total_fold_results['val_loss']):
                 if filter_coeff:
                     loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
                 sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} val_loss'.format(idx+1),
-                             palette=PALETTE)
+                             palette=PALETTE,alpha=ALPHA)
         plt.title('Validation Loss')
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
@@ -386,7 +387,7 @@ class HybridModel:
         plt.subplot(1, 2, 1)
         for idx, f1 in enumerate(total_fold_results['train_f1']):
             sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1),
-                         palette=PALETTE)
+                         palette=PALETTE, alpha=ALPHA)
         plt.title('Train F1 Score')
         plt.xlabel('Epochs')
         plt.ylabel('F1 Score')
@@ -395,7 +396,7 @@ class HybridModel:
         plt.subplot(1, 2, 2)
         for idx, f1 in enumerate(total_fold_results['val_f1']):
             sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} val_f1'.format(idx+1),
-                         palette=PALETTE)
+                         palette=PALETTE, alpha=ALPHA)
         plt.title('Validation F1 Score')
         plt.xlabel('Epochs')
         plt.ylabel('F1 Score')
@@ -463,21 +464,16 @@ class HybridModel:
     def predict(self, X):
         self.cnn_model.eval()
         
-        # Convert input data to tensor
         X_tensor = torch.tensor(X.values, dtype=torch.float32).unsqueeze(1).to(self.device)
         
-        # Process all data at once
         with torch.no_grad():
             embeddings = self.cnn_model(X_tensor).cpu().numpy()
             
-        # Process with interaction pipeline
         interaction = self.ip.transform(X) if self.ip else ValueError("InteractionPipeline not fitted. Call train() first.")
         interaction_feats = interaction.values
         
-        # Combine CNN embeddings with interaction features
         combined = np.hstack((embeddings, interaction_feats))
         
-        # Make predictions
         predictions = self.classifier.predict(combined)
         return predictions
 
