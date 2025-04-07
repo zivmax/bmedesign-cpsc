@@ -27,7 +27,7 @@ ALPHA = 0.5
 np.random.seed(SEED)
 
 class NetCore(nn.Module):
-    def __init__(self, input_length, embedding_dim, kernel_sizes, num_filters, drop_out):
+    def __init__(self, input_length, embedding_dim, kernel_sizes=[3, 5, 7], num_filters=32, drop_out=0.2):
         super(NetCore, self).__init__()
 
         self.conv_layers = nn.ModuleList([
@@ -475,6 +475,6 @@ class HybridModel:
         combined = np.hstack((embeddings, interaction_feats))
         
         predictions = self.classifier.predict(combined)
-        return predictions
+        return combined, predictions
 
 
