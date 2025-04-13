@@ -285,7 +285,7 @@ class HybridModel:
                     patience_counter += 1
                     if patience_counter >= stopping_thershold:
                         if verbose:
-                            tqdm.write(f"Early stopping at epoch {epoch+1}")
+                            tqdm.write(f"Fold {fold+1} early stopping at epoch {epoch+1}")
                         break
 
 # ============================ XGB embedding ==================================
@@ -674,7 +674,7 @@ class AutoGModel:
                     patience_counter += 1
                     if patience_counter >= stopping_threshold:
                         if verbose:
-                            tqdm.write(f"Early stopping at epoch {epoch+1}")
+                            tqdm.write(f"Fold {fold+1} early stopping at epoch {epoch+1}")
                         break
             
             best_fold_model['pipeline'] = ip
@@ -688,7 +688,7 @@ class AutoGModel:
             if verbose:
                 tqdm.write(f"Fold {fold+1}/{splits} completed in {fold_time:.2f}s | "
                           f"Best val loss: {best_val_loss:.4f} | "
-                          f"Best val F1: {best_fold_model['val_f1']:.4f}")
+                          f"Best model val F1: {best_fold_model['val_f1']:.4f}")
         
         best_model_idx = np.argmax([model['val_f1'] for model in total_fold_results['best_models']])
         best_model = total_fold_results['best_models'][best_model_idx]
@@ -703,10 +703,18 @@ class AutoGModel:
         self.total_fold_results = total_fold_results
         
         self.cnn_model.eval()
-        X_tensor = torch.tensor(signal_df.values, dtype=torch.float32).unsqueeze(1).to(self.device)
         
+        full_dataset = SignalDataset(signal_df, target)
+        full_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=False)
+        
+        embeddings_list = []
         with torch.no_grad():
-            embeddings = self.cnn_model(X_tensor).cpu().numpy()
+            for data, _ in tqdm(full_loader, desc="Generating embeddings"):
+                data = data.to(self.device)
+                batch_embeddings = self.cnn_model(data.squeeze(2)).cpu().numpy()
+                embeddings_list.append(batch_embeddings)
+        
+        embeddings = np.vstack(embeddings_list)
         
         interaction_feats = self.ip.transform(signal_df).values
         
