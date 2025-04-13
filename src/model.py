@@ -403,7 +403,7 @@ class HybridModel:
             BASE_PATH = r"src/imgs/training"
             if not os.path.exists(BASE_PATH):
                 os.makedirs(BASE_PATH)
-            plt.savefig(BASE_PATH + r'/train_val_loss.png')
+            plt.savefig(BASE_PATH + r'/hybrid_train_val_loss.png')
         else:
             plt.show()
 # ============================= train and val f1 score ============================
@@ -431,7 +431,7 @@ class HybridModel:
             BASE_PATH = r"src/imgs/training"
             if not os.path.exists(BASE_PATH):
                 os.makedirs(BASE_PATH)
-            plt.savefig(BASE_PATH + r'/train_val_f1.png')
+            plt.savefig(BASE_PATH + r'/hybrid_train_val_f1.png')
         else:
             plt.show()
         
@@ -722,7 +722,82 @@ class AutoGModel:
         )
         print('==================AutoG Finished !==================')
         print(f"Total training time: {str(time.time() - train_start)}s" )
-        return self.predictor.leaderboard()
+        return self.predictor.leaderboard(), self.predictor.model_best
+    
+
+    def train_process_plot(self, save=True, val_loss_log=False, filter_coeff=None):
+        # ============================ train and val loss ============================
+        plt.figure(figsize=(16,6))
+        total_fold_results = self.total_fold_results
+        plt.subplot(1, 2, 1)
+        for idx, loss in enumerate(total_fold_results['train_loss']):
+            sns.lineplot(x=range(len(loss)), y=loss, label=f'Fold{idx+1} train_loss',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Train Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        plt.subplot(1, 2, 2)
+        if val_loss_log:
+            for idx, loss in enumerate(total_fold_results['val_loss']):
+                if filter_coeff:
+                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
+                sns.lineplot(x=range(len(loss)), y=np.log(loss), label=f'Fold{idx+1} val_log_loss',
+                             palette=PALETTE, alpha=ALPHA)
+        else:
+            for idx, loss in enumerate(total_fold_results['val_loss']):
+                if filter_coeff:
+                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
+                sns.lineplot(x=range(len(loss)), y=loss, label=f'Fold{idx+1} val_loss',
+                             palette=PALETTE, alpha=ALPHA)
+        plt.title('Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/autog_train_val_loss.png')
+        else:
+            plt.show()
+            
+        # ============================= train and val f1 score ============================
+        plt.figure(figsize=(16, 6))
+        plt.subplot(1, 2, 1)
+        for idx, f1 in enumerate(total_fold_results['train_f1']):
+            sns.lineplot(x=range(len(f1)), y=f1, label=f'Fold{idx+1} train_f1',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Train F1 Score')
+        plt.xlabel('Epochs')
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        plt.subplot(1, 2, 2)
+        for idx, f1 in enumerate(total_fold_results['val_f1']):
+            sns.lineplot(x=range(len(f1)), y=f1, label=f'Fold{idx+1} val_f1',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Validation F1 Score')
+        plt.xlabel('Epochs')
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/autog_train_val_f1.png')
+        else:
+            plt.show()
+
     
     def predict(self, X):
         self.cnn_model.eval()
