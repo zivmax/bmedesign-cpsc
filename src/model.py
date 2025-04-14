@@ -75,10 +75,12 @@ class NNClassifier(nn.Module):
         super(NNClassifier, self).__init__()
         self.layer1 = nn.Linear(input_dim, hidden_dim1)
         self.layer2 = nn.Linear(hidden_dim1, hidden_dim2)
-        self.layer3 = nn.Linear(hidden_dim2, output_dim)
+        self.layer3 = nn.Linear(hidden_dim2, hidden_dim2)
+        self.layer4 = nn.Linear(hidden_dim2, output_dim)
         self.dropout = nn.Dropout(dropout_rate)
         self.batch_norm1 = nn.BatchNorm1d(hidden_dim1)
         self.batch_norm2 = nn.BatchNorm1d(hidden_dim2)
+        self.batch_norm3 = nn.BatchNorm1d(hidden_dim2)
         
     def forward(self, x):
         x = F.relu(self.layer1(x))
@@ -88,8 +90,12 @@ class NNClassifier(nn.Module):
         x = F.relu(self.layer2(x))
         x = self.batch_norm2(x)
         x = self.dropout(x)
+
+        x = F.relu(self.layer3(x))
+        x = self.batch_norm3(x)
+        x = self.dropout(x)
         
-        x = self.layer3(x)
+        x = self.layer4(x)
         return x
 
 class HybridModel:
@@ -485,19 +491,29 @@ class HybridModel:
             'true_labels': test_labels
         }
     
-    def predict(self, X):
+    def predict(self, X, batch_size=16):
         self.cnn_model.eval()
-        
-        X_tensor = torch.tensor(X.values, dtype=torch.float32).unsqueeze(1).to(self.device)
-        
-        with torch.no_grad():
-            embeddings = self.cnn_model(X_tensor).cpu().numpy()
-            
+
+        all_embeddings = []
+        num_samples = len(X)
+
+        for i in range(0, num_samples, batch_size):
+            batch_end = min(i + batch_size, num_samples)
+            batch_data = X.iloc[i:batch_end]
+
+            X_tensor = torch.tensor(batch_data.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+
+            with torch.no_grad():
+                batch_embeddings = self.cnn_model(X_tensor).cpu().numpy()
+                all_embeddings.append(batch_embeddings)
+
+        embeddings = np.vstack(all_embeddings)
+
         interaction = self.ip.transform(X) if self.ip else ValueError("InteractionPipeline not fitted. Call train() first.")
         interaction_feats = interaction.values
-        
+
         combined = np.hstack((embeddings, interaction_feats))
-        
+
         predictions = self.classifier.predict(combined)
         return combined, predictions
 
@@ -807,24 +823,33 @@ class AutoGModel:
             plt.show()
 
     
-    def predict(self, X):
+    def predict(self, X, batch_size=16):
         self.cnn_model.eval()
 
-        X_tensor = torch.tensor(X.values, dtype=torch.float32).unsqueeze(1).to(self.device)
-        
-        with torch.no_grad():
-            embeddings = self.cnn_model(X_tensor).cpu().numpy()
-            
+        all_embeddings = []
+        num_samples = len(X)
+
+        for i in range(0, num_samples, batch_size):
+            batch_end = min(i + batch_size, num_samples)
+            batch_data = X.iloc[i:batch_end]
+
+            X_tensor = torch.tensor(batch_data.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+
+            with torch.no_grad():
+                batch_embeddings = self.cnn_model(X_tensor).cpu().numpy()
+                all_embeddings.append(batch_embeddings)
+
+        embeddings = np.vstack(all_embeddings)
 
         interaction = self.ip.transform(X) if self.ip else ValueError("InteractionPipeline not fitted. Call train() first.")
         interaction_feats = interaction.values
 
         combined = np.hstack((embeddings, interaction_feats))
         combined_df = pd.DataFrame(combined)
-        
+
         predictions = self.predictor.predict(combined_df)
         prediction_proba = self.predictor.predict_proba(combined_df)
-        
+
         return combined_df, predictions, prediction_proba
     
     def evaluate(self, X_test, y_test, plot=True):
