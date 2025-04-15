@@ -83,7 +83,7 @@ class SignalAugmentationPipeline:
     def get_augmentation_data(self):
         return self.moving_avg_df, self.time_shift_df, self.noise_df
     def get_processed_data(self):
-        return self.final_labeled_df, self.final_labeled_target_df
+        return self.final_labeled_df.reset_index(drop=True), self.final_labeled_target_df.reset_index(drop=True)
 
 # NOTE: sklearn pipeline structure
 class InteractionPipeline:
