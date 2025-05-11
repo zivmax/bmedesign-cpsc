@@ -9,3 +9,9 @@ src/auto_gl.ipynb
 *.html
 AutogluonModels
 src/model
+
+env/
+env_py39/
+=4.36.0
+create_env.sh
+run.txt
