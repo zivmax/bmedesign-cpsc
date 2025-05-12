@@ -857,7 +857,7 @@ class AutoGModel:
         combined_df, predictions, _ = self.predict(X_test)
         combined_df['target'] = y_test.reset_index(drop=True)
         
-        print('==================AutoG Evaluation Begin !==================')
+        print('\n==================AutoG Evaluation Begin !==================\n')
         eval_results = self.predictor.evaluate(combined_df)
         
         if plot:
@@ -872,5 +872,5 @@ class AutoGModel:
                 os.makedirs(os.path.dirname(BASE_PATH))
             plt.savefig(BASE_PATH + r'autog_precision_recall_curve.png')
             plt.close('all')
-            
+        print('\n==================AutoG Evaluation Finished !==================\n')
         return eval_results

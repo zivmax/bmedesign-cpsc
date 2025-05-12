@@ -35,7 +35,18 @@ class LabelPipeline:
     
     def get_raw_data(self):
         return self.target_df if self.cut_edge else None, self.main_df
-
+    
+    def add_labels(self, labels, cutedge:Tuple=(500, 1000)):
+        self.main_df['target'] = -1
+        self.main_df.iloc[0:cutedge[0], -1] = 1
+        self.main_df.iloc[self.cut_edge[0]:self.cut_edge[1], 
+                              -1] = 0
+        labels = np.array(labels).flatten()
+        self.main_df.iloc[cutedge[1]:, -1] = labels
+        self.target_df = self.main_df['target']
+        self.main_df = self.main_df.drop('target', axis=1)
+            
+        return self.main_df, self.target_df
 
 class SignalAugmentationPipeline:
     def __init__(self, labeled_df:pd.DataFrame,
