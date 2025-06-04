@@ -98,425 +98,6 @@ class NNClassifier(nn.Module):
         x = self.layer4(x)
         return x
 
-class HybridModel:
-    def __init__(self, 
-                 cnn_params,
-                 classifier_params,
-                 device='cuda'if torch.cuda.is_available() else 'cpu'):
-        self.device = device 
-        self.cnn_params = cnn_params
-        self.cnn_model = CNNCore(**cnn_params).to(device)
-        self.classifier_params = classifier_params
-        self.xgb_gpu_options = {
-            'tree_method': 'hist',
-            'device': 'cuda' 
-        } if device == 'cuda' else {'tree_method': 'approx'}
-
-    def train(self, signal_df:DataFrame,
-              target:DataFrame,
-              batch_size=32,
-              num_epochs=200,
-              learning_rate=0.0015,
-              weight_decay=1e-5,
-              early_stopping=None,
-              splits=5,
-              verbose=True,
-              model_save_path=r'src\model\best_cnn_model_{}.pth'.format(
-                  datetime.datetime.now().strftime("%Y.%m.%d_%H.%M"))):
-        skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=SEED)
-        total_fold_results = {
-            'train_loss': [],
-            'train_accuracy': [],
-            'train_f1': [],
-            'val_loss': [],
-            'val_accuracy': [],
-            'val_f1': [],
-            'best_models': []
-        }
-        fold_iter = tqdm(enumerate(skf.split(signal_df, target)) , 
-                         total=splits, 
-                         desc="Folds", 
-                         position=0) if verbose else enumerate(skf.split(signal_df, target))
-        stopping_thershold = np.inf if not early_stopping else early_stopping
-
-        for fold, (train_idx, val_idx) in fold_iter:
-            fold_start = time.time()
-            cnn_model = CNNCore(**self.cnn_params).to(self.device)
-            n_classes = len(np.unique(target.iloc[train_idx]))
-            classifier_layer = NNClassifier(self.cnn_params['embedding_dim'], n_classes).to(self.device)
-            criterion = nn.CrossEntropyLoss()
-            optimizer = torch.optim.Adam(list(cnn_model.parameters()) + list(classifier_layer.parameters()),
-                                         learning_rate,
-                                         weight_decay=weight_decay)
-
-# =============================== preprocessing ==================================
-            X_train, y_train = signal_df.iloc[train_idx], target.iloc[train_idx]
-            X_val, y_val = signal_df.iloc[val_idx], target.iloc[val_idx]
-
-            # Fix: same scaling for train and val
-            ip = InteractionPipeline()
-            ip.fit(X_train)
-
-            train_interaction = ip.transform(X_train)
-            val_interaction = ip.transform(X_val)
-
-            train_dataset = SignalDataset(X_train, y_train)
-            val_dataset = SignalDataset(X_val, y_val)
-
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
-
-            fold_train_losses = []
-            fold_train_f1 = []
-            fold_train_accuracy = []
-            fold_val_accuracy = []
-            fold_val_losses = []
-            fold_val_f1 = []
-            best_val_loss = np.inf
-            patience_counter = 0
-            best_fold_model = None
-
-            epoch_iter = tqdm(range(num_epochs), 
-                              desc=f"Fold {fold+1} Epochs", 
-                              position=1, 
-                              leave=False) if verbose else range(num_epochs)
-# ============================= epoch training ====================================
-
-            for epoch in epoch_iter:
-                cnn_model.train()
-                classifier_layer.train()
-                train_loss = 0.0
-                train_correct = 0
-                train_total = 0
-                train_preds = []
-                train_labels_list = []
-                
-                batch_iter = tqdm(enumerate(train_loader), 
-                                  total=len(train_loader),
-                                  desc='Training', 
-                                  position=2, 
-                                  leave=False) if verbose else enumerate(train_loader)
-                
-                for batch_idx, (data, label) in batch_iter:
-                    data, label = data.to(self.device), label.to(self.device)
-                    optimizer.zero_grad()
-
-                    embeddings = cnn_model(data.squeeze(2))
-                    logits = classifier_layer(embeddings)
-                    if label.dim() > 1:
-                        label = label.squeeze(1)  # Ensure label is 1D for CrossEntropyLoss
-                    loss = criterion(logits, label)
-                    loss.backward()
-                    optimizer.step()
-
-
-                    train_loss += loss.item()
-                    _, predicted = torch.max(logits.data, 1)
-                    train_total += label.size(0)
-                    train_correct += (predicted == label).sum().item()
-                    train_preds.extend(predicted.cpu().numpy())
-                    train_labels_list.extend(label.cpu().numpy())
-                    
-                    if verbose:
-                        batch_iter.set_postfix({'loss': f"{loss.item():.4f}"})
-
-                train_loss /= len(train_loader)
-                train_accuracy = train_correct / train_total
-                f1_train = f1_score(train_labels_list, train_preds, average='weighted')
-                fold_train_losses.append(train_loss)
-                fold_train_f1.append(f1_train)
-                fold_train_accuracy.append(train_accuracy)
-
-
-                cnn_model.eval()
-                classifier_layer.eval()
-                val_loss = 0.0
-                val_correct = 0
-                val_total = 0
-                val_preds = []
-                val_labels_list = []
-                
-                val_batch_iter = tqdm(enumerate(val_loader), 
-                                      total=len(val_loader),
-                                      desc='Validation', 
-                                      position=2, 
-                                      leave=False) if verbose else enumerate(val_loader)
-# ============================= validation ========================================
-                with torch.no_grad():
-                    for batch_idx, (data, label) in val_batch_iter:
-                        data, label = data.to(self.device), label.to(self.device)
-                        embeddings = cnn_model(data.squeeze(2))
-
-                        if label.dim() > 1:
-                            label = label.squeeze(1)
-
-                        logits = classifier_layer(embeddings)
-                        loss = criterion(logits, label)
-                        val_loss += loss.item()
-                        _, predicted = torch.max(logits.data, 1)
-                        val_total += label.size(0)
-                        val_correct += (predicted == label).sum().item()
-                        val_preds.extend(predicted.cpu().numpy())
-                        val_labels_list.extend(label.cpu().numpy())
-                        if verbose:
-                            val_batch_iter.set_postfix({'loss': f"{loss.item():.4f}"})
-
-                val_loss /= len(val_loader)
-                val_accuracy = val_correct / val_total
-                f1_val = f1_score(val_labels_list, val_preds, average='weighted')
-                fold_val_losses.append(val_loss)
-                fold_val_f1.append(f1_val)
-                fold_val_accuracy.append(val_accuracy)
-
-
-                if verbose:
-                    epoch_iter.set_postfix({
-                        'train_loss': f"{train_loss:.4f}",
-                        'train_f1': f"{f1_train:.4f}",
-                        'val_loss': f"{val_loss:.4f}",
-                        'val_f1': f"{f1_val:.4f}"
-                    })
-                
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    patience_counter = 0
-                    best_fold_model = {
-                        'cnn_state': cnn_model.state_dict(),
-                        'classifier_layer': classifier_layer.state_dict(),
-                        'epoch': epoch,
-                        'val_loss': val_loss,
-                        'val_f1': f1_val
-                    }
-                else:
-                    patience_counter += 1
-                    if patience_counter >= stopping_thershold:
-                        if verbose:
-                            tqdm.write(f"Fold {fold+1} early stopping at epoch {epoch+1}")
-                        break
-
-# ============================ XGB embedding ==================================
-            print('==================XGB Training Begin !==================')
-            cnn_model.load_state_dict(best_fold_model['cnn_state'])
-            classifier_layer.load_state_dict(best_fold_model['classifier_layer'])
-            cnn_model.eval()
-            classifier_layer.eval()
-
-            # train_dataset_full = SignalDataset(X_train, y_train)
-            # val_dataset_full = SignalDataset(X_val, y_val)
-            # train_loader_full = DataLoader(train_dataset_full, batch_size=batch_size, shuffle=False)
-            # val_loader_full = DataLoader(val_dataset_full, batch_size=batch_size, shuffle=False)
-
-            train_embeddings = []
-            train_labels_all = []
-            for data, label in train_loader:
-                data = data.to(self.device)
-                with torch.no_grad():
-                    e = cnn_model(data.squeeze(2)).cpu().numpy()
-                train_embeddings.append(e)
-                train_labels_all.append(label.numpy())
-
-            train_embeddings = np.vstack(train_embeddings)
-            train_labels_all = np.concatenate(train_labels_all)
-            train_feats = train_interaction.values
-            train_combined = np.hstack((train_embeddings, train_feats))
-            classifier = XGBClassifier(**self.classifier_params,
-                                       **self.xgb_gpu_options,
-                                       random_state=SEED)
-            classifier.fit(train_combined, train_labels_all)
-
-            val_embeddings = []
-            val_labels_all = []
-            for data, label in val_loader:
-                data = data.to(self.device)
-                with torch.no_grad():
-                    e = cnn_model(data.squeeze(2)).cpu().numpy()
-                val_embeddings.append(e)
-                val_labels_all.append(label.numpy())
-            val_embeddings = np.vstack(val_embeddings)
-            val_labels_all = np.concatenate(val_labels_all)
-            val_feats = val_interaction.values
-            val_combined = np.hstack((val_embeddings, val_feats))
-            val_preds = classifier.predict(val_combined)
-            val_xgb_f1 = f1_score(val_labels_all, val_preds, average='weighted')
-
-            total_fold_results['train_loss'].append(fold_train_losses)
-            total_fold_results['train_accuracy'].append(fold_train_accuracy)
-
-            
-            total_fold_results['train_f1'].append(fold_train_f1)
-            total_fold_results['val_accuracy'].append(fold_val_accuracy)
-            
-            total_fold_results['val_loss'].append(fold_val_losses)
-            total_fold_results['val_f1'].append(fold_val_f1)
-            best_fold_model['classifier'] = classifier
-            best_fold_model['val_xgb_f1'] = val_xgb_f1
-            best_fold_model['pipeline'] = ip
-            total_fold_results['best_models'].append(best_fold_model)
-            
-            fold_time = time.time() - fold_start
-            if verbose:
-                tqdm.write(f"Fold {fold+1}/{splits} completed in {fold_time:.2f}s | "
-                           f"Mean train accuracy: {np.mean(fold_train_accuracy):.3f} | "
-                           f"Mean train F1: {np.mean(fold_train_f1):.3f} | "
-                            f"Mean val accuracy: {np.mean(fold_val_accuracy):.3f} | "
-                           f"Mean val F1: {np.mean(fold_val_f1):.3f}")
-
-# ============================ Model selection ==================================
-        best_model_idx = np.argmax([model['val_xgb_f1'] for model in total_fold_results['best_models']])
-        best_model = total_fold_results['best_models'][best_model_idx]
-        
-        torch.save(best_model['cnn_state'], f"{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M')}_Hybrid_CNN.pth") if model_save_path else None
-        self.cnn_model.load_state_dict(best_model['cnn_state'])
-        self.classifier = best_model['classifier']
-        self.ip = best_model['pipeline']
-
-        self.total_fold_results = total_fold_results
-        return total_fold_results
-    
-    def train_process_plot(self, save=True, val_loss_log=False, filter_coeff=None):
-# ============================ train and val loss ============================
-        plt.figure(figsize=(16,6))
-        total_fold_results = self.total_fold_results
-        plt.subplot(1, 2, 1)
-        for idx, loss in enumerate(total_fold_results['train_loss']):
-            sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} train_loss'.format(idx+1),
-                         palette=PALETTE, alpha=ALPHA)
-        plt.title('Train Loss')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.subplot(1, 2, 2)
-        if val_loss_log:
-            for idx, loss in enumerate(total_fold_results['val_loss']):
-                if filter_coeff:
-                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
-                sns.lineplot(x=range(len(loss)), y=np.log(loss), label='Fold{} val_log_loss'.format(idx+1),
-                             palette=PALETTE,alpha=ALPHA)
-        else:
-            for idx, loss in enumerate(total_fold_results['val_loss']):
-                if filter_coeff:
-                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
-                sns.lineplot(x=range(len(loss)), y=loss, label='Fold{} val_loss'.format(idx+1),
-                             palette=PALETTE,alpha=ALPHA)
-        plt.title('Validation Loss')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-        plt.legend()
-        plt.tight_layout()
-        plt.grid(True, linestyle='--', alpha=0.7)
-        if save:
-            BASE_PATH = r"src/imgs/training"
-            if not os.path.exists(BASE_PATH):
-                os.makedirs(BASE_PATH)
-            plt.savefig(BASE_PATH + r'/hybrid_train_val_loss.png')
-        else:
-            plt.show()
-# ============================= train and val f1 score ============================
-        plt.figure(figsize=(16, 6))
-        plt.subplot(1, 2, 1)
-        for idx, f1 in enumerate(total_fold_results['train_f1']):
-            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} train_f1'.format(idx+1),
-                         palette=PALETTE, alpha=ALPHA)
-        plt.title('Train F1 Score')
-        plt.xlabel('Epochs')
-        plt.ylabel('F1 Score')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.subplot(1, 2, 2)
-        for idx, f1 in enumerate(total_fold_results['val_f1']):
-            sns.lineplot(x=range(len(f1)), y=f1, label='Fold{} val_f1'.format(idx+1),
-                         palette=PALETTE, alpha=ALPHA)
-        plt.title('Validation F1 Score')
-        plt.xlabel('Epochs')
-        plt.ylabel('F1 Score')
-        plt.legend()
-        plt.tight_layout()
-        plt.grid(True, linestyle='--', alpha=0.7)
-        if save:
-            BASE_PATH = r"src/imgs/training"
-            if not os.path.exists(BASE_PATH):
-                os.makedirs(BASE_PATH)
-            plt.savefig(BASE_PATH + r'/hybrid_train_val_f1.png')
-        else:
-            plt.show()
-        
-    def evaluate(self, X_test, y_test, batch_size=32, plot=True):
-
-        self.cnn_model.eval()
-
-        test_dataset = SignalDataset(X_test, y_test)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-        
-        test_interaction = self.ip.transform(X_test) if self.ip else ValueError("InteractionPipeline not fitted. Call train() first.")
-
-        test_embeddings = []
-        test_labels = []
-
-        with torch.no_grad():
-            for data, label in test_loader:
-                data = data.to(self.device)
-                embeddings = self.cnn_model(data.squeeze(2)).cpu().numpy()
-                test_embeddings.append(embeddings)
-                test_labels.append(label.numpy())
-
-        test_embeddings = np.vstack(test_embeddings)
-        test_labels = np.concatenate(test_labels)
-
-        test_feats = test_interaction.values
-        test_combined = np.hstack((test_embeddings, test_feats))
-
-        test_preds_proba = self.classifier.predict_proba(test_combined) 
-        test_preds = self.classifier.predict(test_combined)
-
-        # NOTE: test the evaluation here
-        # test_preds = np.zeros_like(test_preds) 
-
-        if plot:
-            plt.figure(figsize=(10, 8))
-            skplot.metrics.plot_precision_recall_curve(y_test, test_preds_proba, 
-                                                   title="Precision-Recall Curve",
-                                                   cmap=PALETTE)
-            plt.grid(True, linestyle='--', alpha=0.7)
-            BASE_PATH = r'src/imgs/evaluation/'
-            if not os.path.exists(os.path.dirname(BASE_PATH)):
-                os.makedirs(os.path.dirname(BASE_PATH))
-            plt.savefig(BASE_PATH + r'precision_recall_curve.png')
-            plt.close('all')
-            
-        return {
-            'f1': f1_score(test_labels, test_preds, average='weighted'),
-            'predictions': test_preds,
-            'true_labels': test_labels
-        }
-    
-    def predict(self, X, batch_size=16):
-        self.cnn_model.eval()
-
-        all_embeddings = []
-        num_samples = len(X)
-
-        for i in range(0, num_samples, batch_size):
-            batch_end = min(i + batch_size, num_samples)
-            batch_data = X.iloc[i:batch_end]
-
-            X_tensor = torch.tensor(batch_data.values, dtype=torch.float32).unsqueeze(1).to(self.device)
-
-            with torch.no_grad():
-                batch_embeddings = self.cnn_model(X_tensor).cpu().numpy()
-                all_embeddings.append(batch_embeddings)
-
-        embeddings = np.vstack(all_embeddings)
-
-        interaction = self.ip.transform(X) if self.ip else ValueError("InteractionPipeline not fitted. Call train() first.")
-        interaction_feats = interaction.values
-
-        combined = np.hstack((embeddings, interaction_feats))
-
-        predictions = self.classifier.predict(combined)
-        return combined, predictions
-
 
 class AutoGModel:
     def __init__(self, 
@@ -791,6 +372,37 @@ class AutoGModel:
         else:
             plt.show()
             
+        # ============================= train and val accuracy ============================
+        plt.figure(figsize=(16, 6))
+        plt.subplot(1, 2, 1)
+        for idx, acc in enumerate(total_fold_results['train_accuracy']):
+            sns.lineplot(x=range(len(acc)), y=acc, label=f'Fold{idx+1} train_accuracy',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Train Accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        plt.subplot(1, 2, 2)
+        for idx, acc in enumerate(total_fold_results['val_accuracy']):
+            sns.lineplot(x=range(len(acc)), y=acc, label=f'Fold{idx+1} val_accuracy',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Validation Accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/autog_train_val_accuracy.png')
+        else:
+            plt.show()
+            
         # ============================= train and val f1 score ============================
         plt.figure(figsize=(16, 6))
         plt.subplot(1, 2, 1)
@@ -845,12 +457,11 @@ class AutoGModel:
         interaction_feats = interaction.values
 
         combined = np.hstack((embeddings, interaction_feats))
-        combined_df = pd.DataFrame(combined)
 
-        predictions = self.predictor.predict(combined_df)
-        prediction_proba = self.predictor.predict_proba(combined_df)
-
-        return combined_df, predictions, prediction_proba
+        predictions = self.classifier.predict(combined)
+        # Ensure binary output
+        predictions = np.where(predictions > 0.5, 1, 0) if predictions.dtype == float else predictions
+        return combined, predictions.astype(int)
     
     def evaluate(self, X_test, y_test, plot=True):
 
@@ -874,3 +485,585 @@ class AutoGModel:
             plt.close('all')
         print('\n==================AutoG Evaluation Finished !==================\n')
         return eval_results
+    
+class HybridModel:
+    def __init__(self, 
+                 cnn_params,
+                 classifier_params,
+                 device='cuda'if torch.cuda.is_available() else 'cpu'):
+        self.device = device 
+        self.cnn_params = cnn_params
+        self.cnn_model = CNNCore(**cnn_params).to(device)
+        self.classifier_params = classifier_params
+        self.xgb_gpu_options = {
+            'tree_method': 'hist',
+            'device': 'cuda' 
+        } if device == 'cuda' else {'tree_method': 'approx'}
+        # Store all fold models for ensemble voting
+        self.fold_models = []
+        self.fold_pipelines = []
+
+    def train(self, signal_df: DataFrame,
+              target: DataFrame,
+              batch_size=16,   # Changed from 32
+              num_epochs=300,  # Changed from 200
+              learning_rate=0.0005,  # Changed from 0.0015
+              weight_decay=1e-5,
+              early_stopping=10,  # Added
+              splits=5,
+              verbose=True,
+              model_save_path=r'src\model\best_cnn_model_{}.pth'.format(
+                  datetime.datetime.now().strftime("%Y.%m.%d_%H.%M"))):
+        skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=SEED)
+        total_fold_results = {
+            'train_loss': [],
+            'train_accuracy': [],
+            'train_f1': [],
+            'val_loss': [],
+            'val_accuracy': [],
+            'val_f1': [],
+            'best_models': []
+        }
+        fold_iter = tqdm(enumerate(skf.split(signal_df, target)) , 
+                         total=splits, 
+                         desc="Folds", 
+                         position=0) if verbose else enumerate(skf.split(signal_df, target))
+        stopping_thershold = np.inf if not early_stopping else early_stopping
+
+        for fold, (train_idx, val_idx) in fold_iter:
+            fold_start = time.time()
+            cnn_model = CNNCore(**self.cnn_params).to(self.device)
+            n_classes = len(np.unique(target.iloc[train_idx]))
+            classifier_layer = NNClassifier(self.cnn_params['embedding_dim'], n_classes).to(self.device)
+            criterion = nn.CrossEntropyLoss()
+            optimizer = torch.optim.Adam(list(cnn_model.parameters()) + list(classifier_layer.parameters()),
+                                         learning_rate,
+                                         weight_decay=weight_decay)
+
+# =============================== preprocessing ==================================
+            X_train, y_train = signal_df.iloc[train_idx], target.iloc[train_idx]
+            X_val, y_val = signal_df.iloc[val_idx], target.iloc[val_idx]
+
+            # Fix: same scaling for train and val
+            ip = InteractionPipeline()
+            ip.fit(X_train)
+
+            train_interaction = ip.transform(X_train)
+            val_interaction = ip.transform(X_val)
+
+            train_dataset = SignalDataset(X_train, y_train)
+            val_dataset = SignalDataset(X_val, y_val)
+
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+
+            fold_train_losses = []
+            fold_train_f1 = []
+            fold_train_accuracy = []
+            fold_val_accuracy = []
+            fold_val_losses = []
+            fold_val_f1 = []
+            best_val_loss = np.inf
+            patience_counter = 0
+            best_fold_model = None
+
+            epoch_iter = tqdm(range(num_epochs), 
+                              desc=f"Fold {fold+1} Epochs", 
+                              position=1, 
+                              leave=False) if verbose else range(num_epochs)
+# ============================= epoch training ====================================
+
+            for epoch in epoch_iter:
+                cnn_model.train()
+                classifier_layer.train()
+                train_loss = 0.0
+                train_correct = 0
+                train_total = 0
+                train_preds = []
+                train_labels_list = []
+                
+                batch_iter = tqdm(enumerate(train_loader), 
+                                  total=len(train_loader),
+                                  desc='Training', 
+                                  position=2, 
+                                  leave=False) if verbose else enumerate(train_loader)
+                
+                for batch_idx, (data, label) in batch_iter:
+                    data, label = data.to(self.device), label.to(self.device)
+                    optimizer.zero_grad()
+
+                    embeddings = cnn_model(data.squeeze(2))
+                    logits = classifier_layer(embeddings)
+                    if label.dim() > 1:
+                        label = label.squeeze(1)  # Ensure label is 1D for CrossEntropyLoss
+                    loss = criterion(logits, label)
+                    loss.backward()
+                    optimizer.step()
+
+
+                    train_loss += loss.item()
+                    _, predicted = torch.max(logits.data, 1)
+                    train_total += label.size(0)
+                    train_correct += (predicted == label).sum().item()
+                    train_preds.extend(predicted.cpu().numpy())
+                    train_labels_list.extend(label.cpu().numpy())
+                    
+                    if verbose:
+                        batch_iter.set_postfix({'loss': f"{loss.item():.4f}"})
+
+                train_loss /= len(train_loader)
+                train_accuracy = train_correct / train_total
+                f1_train = f1_score(train_labels_list, train_preds, average='weighted')
+                fold_train_losses.append(train_loss)
+                fold_train_f1.append(f1_train)
+                fold_train_accuracy.append(train_accuracy)
+
+
+                cnn_model.eval()
+                classifier_layer.eval()
+                val_loss = 0.0
+                val_correct = 0
+                val_total = 0
+                val_preds = []
+                val_labels_list = []
+                
+                val_batch_iter = tqdm(enumerate(val_loader), 
+                                      total=len(val_loader),
+                                      desc='Validation', 
+                                      position=2, 
+                                      leave=False) if verbose else enumerate(val_loader)
+# ============================= validation ========================================
+                with torch.no_grad():
+                    for batch_idx, (data, label) in val_batch_iter:
+                        data, label = data.to(self.device), label.to(self.device)
+                        embeddings = cnn_model(data.squeeze(2))
+
+                        if label.dim() > 1:
+                            label = label.squeeze(1)
+
+                        logits = classifier_layer(embeddings)
+                        loss = criterion(logits, label)
+                        val_loss += loss.item()
+                        _, predicted = torch.max(logits.data, 1)
+                        val_total += label.size(0)
+                        val_correct += (predicted == label).sum().item()
+                        val_preds.extend(predicted.cpu().numpy())
+                        val_labels_list.extend(label.cpu().numpy())
+                        if verbose:
+                            val_batch_iter.set_postfix({'loss': f"{loss.item():.4f}"})
+
+                val_loss /= len(val_loader)
+                val_accuracy = val_correct / val_total
+                f1_val = f1_score(val_labels_list, val_preds, average='weighted')
+                fold_val_losses.append(val_loss)
+                fold_val_f1.append(f1_val)
+                fold_val_accuracy.append(val_accuracy)
+
+
+                if verbose:
+                    epoch_iter.set_postfix({
+                        'train_loss': f"{train_loss:.4f}",
+                        'train_f1': f"{f1_train:.4f}",
+                        'val_loss': f"{val_loss:.4f}",
+                        'val_f1': f"{f1_val:.4f}"
+                    })
+                
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                    best_fold_model = {
+                        'cnn_state': cnn_model.state_dict(),
+                        'classifier_layer': classifier_layer.state_dict(),
+                        'epoch': epoch,
+                        'val_loss': val_loss,
+                        'val_f1': f1_val
+                    }
+                else:
+                    patience_counter += 1
+                    if patience_counter >= stopping_thershold:
+                        if verbose:
+                            tqdm.write(f"Fold {fold+1} early stopping at epoch {epoch+1}")
+                        break
+
+# ============================ XGB embedding ==================================
+            # print('==================XGB Training Begin !==================')
+            cnn_model.load_state_dict(best_fold_model['cnn_state'])
+            classifier_layer.load_state_dict(best_fold_model['classifier_layer'])
+            cnn_model.eval()
+            classifier_layer.eval()
+
+            # train_dataset_full = SignalDataset(X_train, y_train)
+            # val_dataset_full = SignalDataset(X_val, y_val)
+            # train_loader_full = DataLoader(train_dataset_full, batch_size=batch_size, shuffle=False)
+            # val_loader_full = DataLoader(val_dataset_full, batch_size=batch_size, shuffle=False)
+
+            train_embeddings = []
+            train_labels_all = []
+            for data, label in train_loader:
+                data = data.to(self.device)
+                with torch.no_grad():
+                    e = cnn_model(data.squeeze(2)).cpu().numpy()
+                train_embeddings.append(e)
+                train_labels_all.append(label.numpy())
+
+            train_embeddings = np.vstack(train_embeddings)
+            train_labels_all = np.concatenate(train_labels_all)
+            train_feats = train_interaction.values
+            train_combined = np.hstack((train_embeddings, train_feats))
+            classifier = XGBClassifier(**self.classifier_params,
+                                       **self.xgb_gpu_options,
+                                       random_state=SEED)
+            classifier.fit(train_combined, train_labels_all)
+
+            val_embeddings = []
+            val_labels_all = []
+            for data, label in val_loader:
+                data = data.to(self.device)
+                with torch.no_grad():
+                    e = cnn_model(data.squeeze(2)).cpu().numpy()
+                val_embeddings.append(e)
+                val_labels_all.append(label.numpy())
+            val_embeddings = np.vstack(val_embeddings)
+            val_labels_all = np.concatenate(val_labels_all)
+            val_feats = val_interaction.values
+            val_combined = np.hstack((val_embeddings, val_feats))
+            val_preds = classifier.predict(val_combined)
+            val_xgb_f1 = f1_score(val_labels_all, val_preds, average='weighted')
+
+            total_fold_results['train_loss'].append(fold_train_losses)
+            total_fold_results['train_accuracy'].append(fold_train_accuracy)
+
+            
+            total_fold_results['train_f1'].append(fold_train_f1)
+            total_fold_results['val_accuracy'].append(fold_val_accuracy)
+            
+            total_fold_results['val_loss'].append(fold_val_losses)
+            total_fold_results['val_f1'].append(fold_val_f1)
+            best_fold_model['classifier'] = classifier
+            best_fold_model['val_xgb_f1'] = val_xgb_f1
+            best_fold_model['pipeline'] = ip
+            total_fold_results['best_models'].append(best_fold_model)
+            
+            fold_time = time.time() - fold_start
+            if verbose:
+                tqdm.write(f"Fold {fold+1}/{splits} completed in {fold_time:.2f}s | "
+                           f"Mean train accuracy: {np.mean(fold_train_accuracy):.3f} | "
+                           f"Mean train F1: {np.mean(fold_train_f1):.3f} | "
+                            f"Mean val accuracy: {np.mean(fold_val_accuracy):.3f} | "
+                           f"Mean val F1: {np.mean(fold_val_f1):.3f}")
+
+# ============================ Model selection ==================================
+        # Store all models instead of just the best one
+        self.fold_models = []
+        self.fold_pipelines = []
+
+        for fold_model in total_fold_results['best_models']:
+            # Create a new CNN model instance and load the state
+            fold_cnn = CNNCore(**self.cnn_params).to(self.device)
+            fold_cnn.load_state_dict(fold_model['cnn_state'])
+            fold_cnn.eval()
+
+            self.fold_models.append({
+                'cnn_model': fold_cnn,
+                'classifier': fold_model['classifier']
+            })
+            self.fold_pipelines.append(fold_model['pipeline'])
+
+        # Keep the best model as primary for compatibility
+        best_model_idx = np.argmax([model['val_xgb_f1'] for model in total_fold_results['best_models']])
+        best_model = total_fold_results['best_models'][best_model_idx]
+
+        torch.save(best_model['cnn_state'], model_save_path + f"{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M')}_Hybrid_CNN.pth") if model_save_path else None
+        self.cnn_model.load_state_dict(best_model['cnn_state'])
+        self.classifier = best_model['classifier']
+        self.ip = best_model['pipeline']
+
+        self.total_fold_results = total_fold_results
+        return total_fold_results
+
+    def train_process_plot(self, save=True, val_loss_log=False, filter_coeff=None):
+        # ============================ train and val loss ============================
+        plt.figure(figsize=(16,6))
+        total_fold_results = self.total_fold_results
+        plt.subplot(1, 2, 1)
+        for idx, loss in enumerate(total_fold_results['train_loss']):
+            sns.lineplot(x=range(len(loss)), y=loss, label=f'Fold{idx+1} train_loss',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Train Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        plt.subplot(1, 2, 2)
+        if val_loss_log:
+            for idx, loss in enumerate(total_fold_results['val_loss']):
+                if filter_coeff:
+                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
+                sns.lineplot(x=range(len(loss)), y=np.log(loss), label=f'Fold{idx+1} val_log_loss',
+                             palette=PALETTE, alpha=ALPHA)
+        else:
+            for idx, loss in enumerate(total_fold_results['val_loss']):
+                if filter_coeff:
+                    loss = [l for l in loss if l < np.mean(loss) + filter_coeff * np.std(loss)]
+                sns.lineplot(x=range(len(loss)), y=loss, label=f'Fold{idx+1} val_loss',
+                             palette=PALETTE, alpha=ALPHA)
+        plt.title('Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/hybrid_train_val_loss.png')
+        else:
+            plt.show()
+            
+        # ============================= train and val accuracy ============================
+        plt.figure(figsize=(16, 6))
+        plt.subplot(1, 2, 1)
+        for idx, acc in enumerate(total_fold_results['train_accuracy']):
+            sns.lineplot(x=range(len(acc)), y=acc, label=f'Fold{idx+1} train_accuracy',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Train Accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        plt.subplot(1, 2, 2)
+        for idx, acc in enumerate(total_fold_results['val_accuracy']):
+            sns.lineplot(x=range(len(acc)), y=acc, label=f'Fold{idx+1} val_accuracy',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Validation Accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/hybrid_train_val_accuracy.png')
+        else:
+            plt.show()
+            
+        # ============================= train and val f1 score ============================
+        plt.figure(figsize=(16, 6))
+        plt.subplot(1, 2, 1)
+        for idx, f1 in enumerate(total_fold_results['train_f1']):
+            sns.lineplot(x=range(len(f1)), y=f1, label=f'Fold{idx+1} train_f1',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Train F1 Score')
+        plt.xlabel('Epochs')
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        plt.subplot(1, 2, 2)
+        for idx, f1 in enumerate(total_fold_results['val_f1']):
+            sns.lineplot(x=range(len(f1)), y=f1, label=f'Fold{idx+1} val_f1',
+                         palette=PALETTE, alpha=ALPHA)
+        plt.title('Validation F1 Score')
+        plt.xlabel('Epochs')
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        if save:
+            BASE_PATH = r"src/imgs/training"
+            if not os.path.exists(BASE_PATH):
+                os.makedirs(BASE_PATH)
+            plt.savefig(BASE_PATH + r'/hybrid_train_val_f1.png')
+        else:
+            plt.show()
+
+    def _ensemble_predict(self, X, batch_size=16):
+        """Helper method to get predictions from all folds"""
+        all_fold_predictions = []
+        
+        for fold_idx, (fold_model, fold_pipeline) in enumerate(zip(self.fold_models, self.fold_pipelines)):
+            # Get embeddings using this fold's CNN
+            fold_model['cnn_model'].eval()
+            all_embeddings = []
+            num_samples = len(X)
+
+            for i in range(0, num_samples, batch_size):
+                batch_end = min(i + batch_size, num_samples)
+                batch_data = X.iloc[i:batch_end]
+                X_tensor = torch.tensor(batch_data.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+
+                with torch.no_grad():
+                    batch_embeddings = fold_model['cnn_model'](X_tensor).cpu().numpy()
+                    all_embeddings.append(batch_embeddings)
+
+            embeddings = np.vstack(all_embeddings)
+            
+            # Get interaction features using this fold's pipeline
+            interaction = fold_pipeline.transform(X)
+            interaction_feats = interaction.values
+            combined = np.hstack((embeddings, interaction_feats))
+            
+            # Get predictions from this fold's classifier and ensure binary output
+            fold_predictions = fold_model['classifier'].predict(combined)
+            # Ensure binary output (0 or 1)
+            fold_predictions = np.where(fold_predictions > 0.5, 1, 0) if fold_predictions.dtype == float else fold_predictions
+            fold_predictions = fold_predictions.astype(int)
+            all_fold_predictions.append(fold_predictions)
+        
+        return np.array(all_fold_predictions)
+
+    def predict(self, X, batch_size=16):
+        """Predict using ensemble voting from all folds"""
+        if not self.fold_models:
+            # Fallback to single model prediction with binary output
+            combined, predictions = self.cnn_model.eval()
+            predictions = self.classifier.predict(combined)
+            # Ensure binary output
+            predictions = np.where(predictions > 0.5, 1, 0) if predictions.dtype == float else predictions
+            return combined, predictions.astype(int)
+        
+        # Get predictions from all folds
+        all_fold_predictions = self._ensemble_predict(X, batch_size)
+        
+        # Majority voting for binary classification
+        ensemble_predictions = []
+        for i in range(all_fold_predictions.shape[1]):
+            votes = all_fold_predictions[:, i]
+            # For binary classification, use majority vote
+            majority_vote = 1 if np.sum(votes) > len(votes) / 2 else 0
+            ensemble_predictions.append(majority_vote)
+        
+        ensemble_predictions = np.array(ensemble_predictions, dtype=int)
+        
+        # Return combined features from the best model for compatibility
+        interaction = self.ip.transform(X)
+        all_embeddings = []
+        num_samples = len(X)
+        
+        for i in range(0, num_samples, batch_size):
+            batch_end = min(i + batch_size, num_samples)
+            batch_data = X.iloc[i:batch_end]
+            X_tensor = torch.tensor(batch_data.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+            
+            with torch.no_grad():
+                batch_embeddings = self.cnn_model(X_tensor).cpu().numpy()
+                all_embeddings.append(batch_embeddings)
+        
+        embeddings = np.vstack(all_embeddings)
+        interaction_feats = interaction.values
+        combined = np.hstack((embeddings, interaction_feats))
+        
+        return combined, ensemble_predictions
+
+    def evaluate(self, X_test, y_test, batch_size=32, plot=True):
+        """Evaluate using ensemble voting from all folds"""
+        if not self.fold_models:
+            # Fallback to single model evaluation
+            test_dataset = SignalDataset(X_test, y_test)
+            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+            
+            test_interaction = self.ip.transform(X_test)
+            test_embeddings = []
+            
+            with torch.no_grad():
+                for data, _ in test_loader:
+                    data = data.to(self.device)
+                    embeddings = self.cnn_model(data.squeeze(2)).cpu().numpy()
+                    test_embeddings.append(embeddings)
+            
+            test_embeddings = np.vstack(test_embeddings)
+            test_feats = test_interaction.values
+            test_combined = np.hstack((test_embeddings, test_feats))
+            
+            test_preds = self.classifier.predict(test_combined)
+            # Ensure binary output
+            test_preds = np.where(test_preds > 0.5, 1, 0) if test_preds.dtype == float else test_preds
+            test_preds = test_preds.astype(int)
+            
+            if plot:
+                test_preds_proba = self.classifier.predict_proba(test_combined)
+                # For binary classification, use class 1 probabilities
+                if test_preds_proba.shape[1] == 2:
+                    test_preds_proba = test_preds_proba[:, 1]
+                
+                plt.figure(figsize=(10, 8))
+                skplot.metrics.plot_precision_recall_curve(y_test, test_preds_proba, 
+                                                         title="Precision-Recall Curve",
+                                                         cmap=PALETTE)
+                plt.grid(True, linestyle='--', alpha=0.7)
+                BASE_PATH = r'src/imgs/evaluation/'
+                if not os.path.exists(os.path.dirname(BASE_PATH)):
+                    os.makedirs(os.path.dirname(BASE_PATH))
+                plt.savefig(BASE_PATH + r'precision_recall_curve.png')
+                plt.close('all')
+            
+            return {
+                'f1': f1_score(y_test, test_preds, average='binary'),
+                'predictions': test_preds,
+                'true_labels': y_test.values if hasattr(y_test, 'values') else y_test
+            }
+
+        # Get ensemble predictions
+        _, ensemble_predictions = self.predict(X_test, batch_size)
+        
+        if plot:
+            # For plotting, we'll use probability averages from all folds
+            all_fold_probas = []
+            
+            for fold_model, fold_pipeline in zip(self.fold_models, self.fold_pipelines):
+                fold_model['cnn_model'].eval()
+                test_dataset = SignalDataset(X_test, y_test)
+                test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+                
+                test_interaction = fold_pipeline.transform(X_test)
+                test_embeddings = []
+                
+                with torch.no_grad():
+                    for data, _ in test_loader:
+                        data = data.to(self.device)
+                        embeddings = fold_model['cnn_model'](data.squeeze(2)).cpu().numpy()
+                        test_embeddings.append(embeddings)
+                
+                test_embeddings = np.vstack(test_embeddings)
+                test_feats = test_interaction.values
+                test_combined = np.hstack((test_embeddings, test_feats))
+                
+                fold_proba = fold_model['classifier'].predict_proba(test_combined)
+                # For binary classification, use class 1 probabilities
+                if fold_proba.shape[1] == 2:
+                    fold_proba = fold_proba[:, 1]
+                all_fold_probas.append(fold_proba)
+            
+            # Average probabilities across folds
+            ensemble_proba = np.mean(all_fold_probas, axis=0)
+            
+            # Reshape ensemble_proba to 2D format expected by scikitplot
+            if ensemble_proba.ndim == 1:
+                ensemble_proba_2d = np.column_stack([1 - ensemble_proba, ensemble_proba])
+            else:
+                ensemble_proba_2d = ensemble_proba
+            
+            plt.figure(figsize=(10, 8))
+            skplot.metrics.plot_precision_recall_curve(y_test, ensemble_proba_2d, 
+                                                     title="Ensemble Precision-Recall Curve",
+                                                     cmap=PALETTE)
+            plt.grid(True, linestyle='--', alpha=0.7)
+            BASE_PATH = r'src/imgs/evaluation/'
+            if not os.path.exists(os.path.dirname(BASE_PATH)):
+                os.makedirs(os.path.dirname(BASE_PATH))
+            plt.savefig(BASE_PATH + r'ensemble_precision_recall_curve.png')
+            plt.close('all')
+        
+        return {
+            'f1': f1_score(y_test, ensemble_predictions, average='binary'),
+            'predictions': ensemble_predictions,
+            'true_labels': y_test.values if hasattr(y_test, 'values') else y_test
+        }
