@@ -35,10 +35,10 @@ if __name__ == '__main__':
     labels = np.loadtxt(r'data/unlabeled_predictions.csv', delimiter=',')
     
     labeled_signals, targets = lp.add_labels(labels, cutedge=(500, 1000))
-    sap = SignalAugmentationPipeline(
-        labeled_signals, targets,
-        window_length=5, lag=5, noise_level=0.05, diff=False)
-    labeled_signals, targets = sap.get_processed_data()
+    # sap = SignalAugmentationPipeline(
+    #     labeled_signals, targets,
+    #     window_length=5, lag=5, noise_level=0.05, diff=False)
+    # labeled_signals, targets = sap.get_processed_data()
     print(f"Total labeled signals: {labeled_signals.shape[0]}, "
           f"Total targets: {targets.shape[0]}")
     
