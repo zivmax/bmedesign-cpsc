@@ -9,3 +9,4 @@ src/auto_gl.ipynb
 *.html
 AutogluonModels
 src/model
+models/
