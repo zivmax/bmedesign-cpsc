@@ -10,8 +10,10 @@ from sklearn.preprocessing import StandardScaler
 # Replaced h5py loading with pandas for the CSV file.
 # Assumes the script is run from the workspace root, so 'data/traindata.csv' is the correct path.
 # Assumes the CSV has no header row.
-df = pd.read_csv('data/traindata.csv', header=None)
-traindata = df.values  # Data is (samples, features), matching previous shape after transpose.
+df = pd.read_csv("data/traindata.csv", header=None)
+traindata = (
+    df.values
+)  # Data is (samples, features), matching previous shape after transpose.
 
 # Data partitioning
 # First 500 records are atrial fibrillation (label=1), 501-1000 are non-atrial fibrillation (label=0), the rest are unlabeled data
@@ -32,7 +34,9 @@ X_labeled = scaler.fit_transform(X_labeled)
 X_unlabeled = scaler.transform(X_unlabeled)
 
 # Split training and validation sets
-X_train, X_val, y_train, y_val = train_test_split(X_labeled, y_labeled, test_size=0.2, random_state=42, stratify=y_labeled)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_labeled, y_labeled, test_size=0.2, random_state=42, stratify=y_labeled
+)
 
 # Adjust data shape to 3D
 # Convert (batch_size, sequence_length) to (batch_size, num_channels, sequence_length)
@@ -41,7 +45,7 @@ X_val = X_val[:, np.newaxis, :]
 X_unlabeled = X_unlabeled[:, np.newaxis, :]
 
 # Load Mantis model
-device = 'cuda'  # Set to 'cuda' if GPU is available, otherwise use 'cpu'
+device = "cuda"  # Set to 'cuda' if GPU is available, otherwise use 'cpu'
 network = Mantis8M(device=device)
 network = network.from_pretrained("paris-noah/Mantis-8M")
 
@@ -51,7 +55,7 @@ model = MantisTrainer(device=device, network=network)
 # Feature extraction
 print("Extracting features from training and validation data...")
 X_train_features = model.transform(X_train)  # 3D input
-X_val_features = model.transform(X_val)      # 3D input
+X_val_features = model.transform(X_val)  # 3D input
 
 # Train using scikit-learn or other classifiers
 from sklearn.ensemble import RandomForestClassifier
@@ -62,7 +66,7 @@ classifier.fit(X_train_features, y_train)
 # Validate model performance
 y_val_pred = classifier.predict(X_val_features)
 print("Validation Classification Report:")
-print(classification_report(y_val, y_val_pred, target_names=['Non-AF', 'AF']))
+print(classification_report(y_val, y_val_pred, target_names=["Non-AF", "AF"]))
 
 # Predict unlabeled data
 print("Predicting unlabeled data...")
@@ -71,7 +75,7 @@ y_unlabeled_pred = classifier.predict(X_unlabeled_features)
 
 # Save predictions to a CSV file using pandas
 predictions_df = pd.DataFrame(y_unlabeled_pred)
-csv_output_path = 'test/unlabeled_predictions.csv'
+csv_output_path = "test/unlabeled_predictions.csv"
 predictions_df.to_csv(csv_output_path, header=False, index=False)
 
 print(f"Prediction results saved to '{csv_output_path}'")
