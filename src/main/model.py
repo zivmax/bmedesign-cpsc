@@ -427,8 +427,6 @@ class HybridModel:
                 raise  # Re-raise if it's a different error or not a CUDA busy error
 
         self.classifier_params = classifier_params
-        self.fold_models = []
-        self.fold_pipelines = []
         self.model_save_path = None
         self.classifier = None
         self.ip = None
@@ -626,29 +624,29 @@ class HybridModel:
         self.classifier = best_overall_model_details["classifier_xgb_state"]
         self.ip = best_overall_model_details["pipeline_state"]
 
-        # Populate self.fold_models and self.fold_pipelines for potential ensemble use
-        self.fold_models = []
-        self.fold_pipelines = []
-        for fold_details_item in self.total_fold_results[
-            "best_models_details"
-        ]:  # Iterate over the list of dicts
-            if (
-                fold_details_item and fold_details_item.get("val_xgb_f1", -1) > -1
-            ):  # Check if fold was successful
-                fold_cnn_instance = CNNCore(**self.cnn_params)
-                fold_cnn_instance.load_state_dict(fold_details_item["cnn_state"])
-                fold_cnn_instance.eval()
-
-                self.fold_models.append(
-                    {
-                        "cnn_model": fold_cnn_instance,
-                        "classifier": fold_details_item["classifier_xgb_state"],
-                    }
-                )
-                self.fold_pipelines.append(fold_details_item["pipeline_state"])
+        # Remove population of self.fold_models and self.fold_pipelines
+        # self.fold_models = []
+        # self.fold_pipelines = []
+        # for fold_details_item in self.total_fold_results[
+        #     "best_models_details"
+        # ]:  # Iterate over the list of dicts
+        #     if (
+        #         fold_details_item and fold_details_item.get("val_xgb_f1", -1) > -1
+        #     ):  # Check if fold was successful
+        #         fold_cnn_instance = CNNCore(**self.cnn_params)
+        #         fold_cnn_instance.load_state_dict(fold_details_item["cnn_state"])
+        #         fold_cnn_instance.eval()
+        #
+        #         self.fold_models.append(
+        #             {
+        #                 "cnn_model": fold_cnn_instance,
+        #                 "classifier": fold_details_item["classifier_xgb_state"],
+        #             }
+        #         )
+        #         self.fold_pipelines.append(fold_details_item["pipeline_state"])
         if verbose:
             print(
-                f"Best model components loaded into HybridModel instance. {len(self.fold_models)} fold models stored."
+                f"Best model components loaded into HybridModel instance."  # Removed mention of fold models
             )
         return self.total_fold_results
 
@@ -837,218 +835,55 @@ class HybridModel:
             print(f"Training plots saved to {base_path}")
         plt.close()  # Close the last plot figure
 
-    def _ensemble_predict(self, X: DataFrame, batch_size=16):
-        if not self.fold_models:
-            print(
-                "Warning: No fold models available for ensemble prediction. Attempting fallback to single model."
-            )
-            if self.cnn_model and self.classifier and self.ip:
-                # This is a simplified fallback, ideally predict() handles this.
-                # For _ensemble_predict, we strictly expect fold_models.
-                # Re-evaluate if this fallback is needed here or should be solely in predict().
-                # For now, let's assume _ensemble_predict requires fold_models.
-                raise RuntimeError(
-                    "No fold models available for _ensemble_predict. This method is for ensemble mode only."
-                )
-            else:
-                raise RuntimeError(
-                    "No fold models and no single model loaded for fallback in _ensemble_predict."
-                )
-
-        all_fold_predictions_list = []
-        # Determine a common device for prediction if possible, or handle device for each fold_cnn_model
-        # For simplicity, using self.device (main model's device) for predictions.
-        # Fold CNN models in self.fold_models might be on CPU if saved that way.
-
-        start_time = time.time()
-
-        for fold_idx, (fold_model_dict, fold_pipeline) in enumerate(
-            zip(self.fold_models, self.fold_pipelines)
-        ):
-            # Ensure the fold's CNN model is on the correct device for prediction
-            current_cnn_model = fold_model_dict["cnn_model"].to(self.device)
-            current_cnn_model.eval()
-            current_xgb_classifier = fold_model_dict[
-                "classifier"
-            ]  # XGBoost model, device handled by XGBoost itself
-
-            fold_embeddings_list = []
-            num_samples = len(X)
-            for i in range(0, num_samples, batch_size):
-                batch_end = min(i + batch_size, num_samples)
-                # Assuming X is a DataFrame
-                batch_data_values = X.iloc[i:batch_end].values
-                X_tensor = (
-                    torch.tensor(batch_data_values, dtype=torch.float32)
-                    .unsqueeze(1)
-                    .to(self.device)
-                )
-                with torch.no_grad():
-                    batch_embeddings = (
-                        current_cnn_model(X_tensor).cpu().numpy()
-                    )  # Embeddings to CPU for hstack
-                    fold_embeddings_list.append(batch_embeddings)
-
-            if not fold_embeddings_list:
-                continue  # Should not happen if X is not empty
-
-            fold_embeddings = np.vstack(fold_embeddings_list)
-            fold_interaction = fold_pipeline.transform(X)  # Use this fold's pipeline
-            fold_interaction_feats = fold_interaction.values
-            fold_combined = np.hstack((fold_embeddings, fold_interaction_feats))
-
-            fold_predictions = current_xgb_classifier.predict(fold_combined)
-            fold_predictions = (
-                np.where(fold_predictions > 0.5, 1, 0)
-                if fold_predictions.dtype == float
-                else fold_predictions
-            )
-            all_fold_predictions_list.append(fold_predictions.astype(int))
-
-        end_time = time.time()
-        time_per_prediction = (
-            (end_time - start_time) / len(X)
-            if len(X) > 0 and all_fold_predictions_list
-            else 0
-        )
-
-        if not all_fold_predictions_list:  # If all folds failed or X was empty
-            # Return an empty array of appropriate shape or handle error
-            return (
-                np.array([]).reshape(0, len(X) if X is not None and not X.empty else 0),
-                0,
-            )
-
-        return np.array(all_fold_predictions_list), time_per_prediction
-
     def predict(self, X: DataFrame, batch_size=16):
         start_time_total = time.time()
 
-        if not self.fold_models and not (
-            self.cnn_model and self.classifier and self.ip
-        ):
+        if not (self.cnn_model and self.classifier and self.ip):
             raise RuntimeError(
                 "Model not trained or loaded. Call train() or load_weights() first."
             )
 
-        if not self.fold_models:
-            if self.cnn_model is None or self.classifier is None or self.ip is None:
-                raise RuntimeError(
-                    "Single model components not fully loaded/available for prediction."
-                )
-            print("Predicting with single loaded model (not ensemble).")
-            self.cnn_model.eval()
-            self.cnn_model.to(self.device)
-
-            all_embeddings = []
-            num_samples = len(X)
-            for i in range(0, num_samples, batch_size):
-                batch_end = min(i + batch_size, num_samples)
-                batch_data_values = X.iloc[i:batch_end].values
-                X_tensor = (
-                    torch.tensor(batch_data_values, dtype=torch.float32)
-                    .unsqueeze(1)
-                    .to(self.device)
-                )
-                with torch.no_grad():
-                    batch_embeddings = self.cnn_model(X_tensor).cpu().numpy()
-                    all_embeddings.append(batch_embeddings)
-
-            if not all_embeddings:  # Handle empty X
-                return pd.DataFrame(), np.array([]), 0
-
-            embeddings = np.vstack(all_embeddings)
-            interaction = self.ip.transform(X)
-            interaction_feats = interaction.values
-            combined_features = np.hstack((embeddings, interaction_feats))
-
-            predictions = self.classifier.predict(combined_features)
-            predictions = (
-                np.where(predictions > 0.5, 1, 0)
-                if predictions.dtype == float
-                else predictions
+        # Simplified: Always use the single loaded model
+        if self.cnn_model is None or self.classifier is None or self.ip is None:
+            raise RuntimeError(
+                "Single model components not fully loaded/available for prediction."
             )
-            final_predictions = predictions.astype(int)
-
-            time_per_pred = (
-                (time.time() - start_time_total) / len(X) if len(X) > 0 else 0
-            )
-            return combined_features, final_predictions, time_per_pred
-
-        # Proceed with ensemble prediction
-        all_fold_predictions_array, _ = self._ensemble_predict(
-            X, batch_size
-        )  # Time already calculated per step if needed
-
-        if all_fold_predictions_array.shape[0] == 0:
-            print(
-                "Warning: _ensemble_predict returned no predictions. Check fold model training."
-            )
-            # Fallback or error, for now, let's assume an issue and return empty.
-            return pd.DataFrame(), np.array([]), 0
-
-        # Majority voting: input (num_folds, num_samples), output (num_samples,)
-        if (
-            all_fold_predictions_array.ndim == 2
-            and all_fold_predictions_array.shape[1] > 0
-        ):
-            # Ensure all elements are integers for bincount
-            ensemble_predictions = np.apply_along_axis(
-                lambda x: np.bincount(x.astype(int)).argmax(),
-                axis=0,
-                arr=all_fold_predictions_array,
-            )
-        elif (
-            all_fold_predictions_array.shape[1] == 0
-            and all_fold_predictions_array.shape[0] > 0
-        ):  # No samples but folds exist
-            ensemble_predictions = np.array([])
-        else:  # No folds or unexpected shape
-            print(
-                f"Warning: Unexpected shape from _ensemble_predict: {all_fold_predictions_array.shape}. Cannot perform majority vote."
-            )
-            return pd.DataFrame(), np.array([]), 0
-
-        # For returning 'combined' features, use the primary loaded model (best one from train or load_weights)
+        # print("Predicting with single loaded model (not ensemble).") # Optional: keep if useful
         self.cnn_model.eval()
         self.cnn_model.to(self.device)
-        primary_embeddings_list = []
+
+        all_embeddings = []
         num_samples = len(X)
-        if num_samples > 0:
-            for i in range(0, num_samples, batch_size):
-                batch_end = min(i + batch_size, num_samples)
-                batch_data_values = X.iloc[i:batch_end].values
-                X_tensor = (
-                    torch.tensor(batch_data_values, dtype=torch.float32)
-                    .unsqueeze(1)
-                    .to(self.device)
-                )
-                with torch.no_grad():
-                    batch_embeddings = self.cnn_model(X_tensor).cpu().numpy()
-                    primary_embeddings_list.append(batch_embeddings)
-            primary_embeddings = np.vstack(primary_embeddings_list)
-
-            if self.ip is None:
-                raise ValueError("Primary InteractionPipeline (self.ip) not available.")
-            primary_interaction = self.ip.transform(X)
-            primary_interaction_feats = primary_interaction.values
-            combined_for_return = np.hstack(
-                (primary_embeddings, primary_interaction_feats)
+        for i in range(0, num_samples, batch_size):
+            batch_end = min(i + batch_size, num_samples)
+            batch_data_values = X.iloc[i:batch_end].values
+            X_tensor = (
+                torch.tensor(batch_data_values, dtype=torch.float32)
+                .unsqueeze(1)
+                .to(self.device)
             )
-        else:  # Handle empty X DataFrame
-            combined_for_return = (
-                pd.DataFrame()
-            )  # Or np.array([]).reshape(0, feature_dim) if dim is known
+            with torch.no_grad():
+                batch_embeddings = self.cnn_model(X_tensor).cpu().numpy()
+                all_embeddings.append(batch_embeddings)
 
-        total_time_per_prediction = (
-            (time.time() - start_time_total) / len(X) if len(X) > 0 else 0
-        )
+        if not all_embeddings:  # Handle empty X
+            return pd.DataFrame(), np.array([]), 0
 
-        return (
-            combined_for_return,
-            ensemble_predictions.astype(int),
-            total_time_per_prediction,
+        embeddings = np.vstack(all_embeddings)
+        interaction = self.ip.transform(X)
+        interaction_feats = interaction.values
+        combined_features = np.hstack((embeddings, interaction_feats))
+
+        predictions = self.classifier.predict(combined_features)
+        predictions = (
+            np.where(predictions > 0.5, 1, 0)
+            if predictions.dtype == float
+            else predictions
         )
+        final_predictions = predictions.astype(int)
+
+        time_per_pred = (time.time() - start_time_total) / len(X) if len(X) > 0 else 0
+        return combined_features, final_predictions, time_per_pred
 
     def evaluate(self, X_test: DataFrame, y_test: Series, batch_size=32, plot=True):
         # Ensure y_test is numpy array for metric functions
@@ -1103,7 +938,7 @@ class HybridModel:
                 labels=(
                     np.unique(np.concatenate((y_test_numpy, predictions)))
                     if len(np.unique(np.concatenate((y_test_numpy, predictions)))) > 0
-                    else [0, 1]
+                    else [0, 1]  # Default labels for binary case if no data
                 ),
             )
             if (
@@ -1139,9 +974,7 @@ class HybridModel:
         ):  # If labels arg fails due to no common labels or empty inputs
             cm = np.zeros((2, 2), dtype=int)  # Default CM
 
-        print(
-            f"Evaluation Results (using {'Ensemble of '+str(len(self.fold_models))+' folds' if self.fold_models else 'Single Model'}):"
-        )
+        print(f"Evaluation Results (using Single Model):")  # Removed ensemble mention
         print(f"  Precision: {precision:.4f}")
         print(f"  Recall: {recall:.4f}")
         print(f"  F1 Score: {f1:.4f}")
@@ -1196,8 +1029,8 @@ class HybridModel:
             )
             self.ip = None
 
-        self.fold_models = []
-        self.fold_pipelines = []
+        # self.fold_models = [] # Removed
+        # self.fold_pipelines = [] # Removed
         print(
-            "Model weights and pipeline loaded (single best model configuration). Ensemble folds cleared."
+            "Model weights and pipeline loaded (single best model configuration)."  # Removed ensemble mention
         )
