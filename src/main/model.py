@@ -981,13 +981,6 @@ class HybridModel:
         print(f"  Time per prediction: {time_per_pred:.6f} seconds")
         print(f"  Confusion Matrix:\n{cm}")
 
-        if plot:
-            # Plotting logic (e.g., confusion matrix)
-            # import scikitplot as skplt # Ensure imported
-            # skplt.metrics.plot_confusion_matrix(y_test_numpy, predictions, normalize=True)
-            # plt.show()
-            pass  # Placeholder
-
         return {
             "precision": precision,
             "recall": recall,
@@ -1029,8 +1022,6 @@ class HybridModel:
             )
             self.ip = None
 
-        # self.fold_models = [] # Removed
-        # self.fold_pipelines = [] # Removed
         print(
             "Model weights and pipeline loaded (single best model configuration)."  # Removed ensemble mention
         )
