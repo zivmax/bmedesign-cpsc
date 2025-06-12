@@ -1,4 +1,4 @@
-from utils.signal_toolkit import SignalOps, SignalFeatures
+from .signal_toolkit import SignalOps, SignalFeatures
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.utils import shuffle
 from typing import Tuple
