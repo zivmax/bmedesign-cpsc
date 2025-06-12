@@ -37,9 +37,22 @@ class SignalOps:
 
     @staticmethod
     def time_shift(signal, lag=400, diff=True):
-        shifted_signal = np.zeros_like(signal)
-        shifted_signal[lag:] = signal[:-lag]
-        return shifted_signal if not diff else signal - shifted_signal
+        signal_array = np.asarray(signal)  # Ensure signal is a numpy array for consistent behavior
+        signal_len = len(signal_array)
+
+        if lag == 0:
+            return np.zeros_like(signal_array) if diff else signal_array.copy()
+
+        shifted_signal = np.zeros_like(signal_array)
+
+        # Ensure lag is positive for this shifting logic
+        if lag > 0:
+            if lag < signal_len:
+                shifted_signal[lag:] = signal_array[:-lag]
+            # If lag >= signal_len, shifted_signal remains all zeros, which is correct.
+        # If lag < 0, current logic doesn't handle it; assume lag is non-negative.
+
+        return signal_array - shifted_signal if diff else shifted_signal
 
     @staticmethod
     def add_noise(signal, noise_factor=0.1):

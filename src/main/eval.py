@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-from ..utils.pipeline import LabelPipeline
+from ..utils.pipeline import LabelPipeline, SignalAugmentationPipeline # Added SignalAugmentationPipeline
 
 # Assuming HybridModel is in the same directory in model.py
 from .model import HybridModel
@@ -174,6 +174,108 @@ def main():
         print(f"Evaluation results saved to {current_output_csv_path}")
     except Exception as e:
         print(f"Error saving evaluation results to CSV: {e}")
+
+    # Robustness evaluation
+    print("\\n--- Robustness Evaluation (Noisy Data) ---")
+    
+    try:
+        print("Generating noisy test data for robustness check...")
+        NOISE_LEVEL_ROBUSTNESS = 0.1 # Example noise level
+        
+        X_test_noisy = pd.DataFrame() # Initialize as empty
+
+        if isinstance(X_test, pd.DataFrame) and not X_test.empty:
+            X_test_T = X_test.T
+            # y_test is a pd.Series, convert to DataFrame for the pipeline
+            y_test_df_for_pipeline = y_test.to_frame() 
+
+            sap = SignalAugmentationPipeline(
+                labeled_df=X_test_T, # Signals as columns
+                labeled_target_df=y_test_df_for_pipeline, # Targets
+                noise_level=NOISE_LEVEL_ROBUSTNESS,
+                window_length=1,  # Corrected: Use 1 to safely neutralize moving average
+                lag=0,            # lag=0 for time_shift (results in zeros if diff=True)
+                diff=True         # Default for SignalAugmentationPipeline
+            )
+            
+            # sap.noise_df contains the noisy signals, with signals as columns
+            X_test_noisy_T = sap.noise_df
+            
+            if X_test_noisy_T is not None and not X_test_noisy_T.empty:
+                X_test_noisy = X_test_noisy_T.T # Transpose back
+                X_test_noisy.columns = X_test.columns # Restore original column names
+                X_test_noisy.index = X_test.index   # Restore original index
+                print(f"Applied noise (level {NOISE_LEVEL_ROBUSTNESS}) via SignalAugmentationPipeline to {len(X_test_noisy)} test samples.")
+            else:
+                print("Warning: SignalAugmentationPipeline returned empty or None noise_df.")
+        else:
+            print("Warning: X_test is not a suitable DataFrame (empty or not DataFrame type).")
+
+        if X_test_noisy.empty:
+            print("Noisy test data is empty or could not be generated. Skipping robustness evaluation.")
+            return # Exit main if noisy data generation failed
+
+        print("Starting robustness evaluation (with noisy data)...")
+        eval_results_noisy = model.evaluate(X_test_noisy, y_test, batch_size=BATCH_SIZE, plot=False)
+
+        if not eval_results_noisy:
+            print("Robustness evaluation (noisy data) did not return any results. Cannot proceed.")
+            return
+
+        f1_noisy = eval_results_noisy.get("f1")
+        precision_noisy = eval_results_noisy.get("precision")
+        recall_noisy = eval_results_noisy.get("recall")
+        cm_noisy = eval_results_noisy.get("confusion_matrix")
+
+        if any(m is None for m in [f1_noisy, precision_noisy, recall_noisy, cm_noisy]):
+            print("Robustness evaluation results dictionary is missing one or more required keys (f1, precision, recall, confusion_matrix).")
+            print(f"Received keys: {list(eval_results_noisy.keys())}")
+            return
+
+        print("\n--- Robustness Evaluation Summary (Noisy Data) ---")
+        print(f"F1 Score (Noisy): {f1_noisy:.4f}")
+        print(f"Precision (Noisy): {precision_noisy:.4f}")
+        print(f"Recall (Noisy): {recall_noisy:.4f}")
+        print(f"Confusion Matrix (Noisy):\n{cm_noisy}")
+
+        results_noisy_df = pd.DataFrame({
+            "eval_type": ["robustness_noisy"],
+            "noise_level": [NOISE_LEVEL_ROBUSTNESS],
+            "f1_score": [f1_noisy],
+            "precision": [precision_noisy],
+            "recall": [recall_noisy],
+        })
+        
+        # Ensure output_dir is defined from the previous section for saving results
+        # This reuses the output_dir logic from the main evaluation part.
+        # If current_output_csv_path was just a filename, output_dir will be "."
+        if 'output_dir' not in locals() or not os.path.exists(output_dir): # Check if output_dir exists from prior step
+             output_dir_robustness = os.path.dirname(current_output_csv_path) # Fallback to current_output_csv_path's dir
+             if output_dir_robustness and not os.path.exists(output_dir_robustness):
+                 try:
+                     os.makedirs(output_dir_robustness)
+                     print(f"Created output directory for noisy results: {output_dir_robustness}")
+                 except OSError as e:
+                     print(f"Error creating output directory {output_dir_robustness} for noisy results: {e}. Saving to current directory.")
+                     output_dir_robustness = "." 
+             elif not output_dir_robustness: # If current_output_csv_path was just a filename
+                 output_dir_robustness = "."
+        else:
+            output_dir_robustness = output_dir # Use existing output_dir
+
+        noisy_results_path = os.path.join(output_dir_robustness, "evaluation_results_noisy.csv")
+        try:
+            results_noisy_df.to_csv(noisy_results_path, index=False)
+            print(f"Robustness evaluation results saved to {noisy_results_path}")
+        except Exception as e:
+            print(f"Error saving robustness evaluation results to CSV: {e}")
+
+    except ImportError as e:
+        print(f"ImportError during robustness evaluation: {e}. Make sure SignalOps is correctly placed and importable.")
+    except AttributeError as e:
+        print(f"AttributeError during robustness evaluation: {e}. This might be due to SignalOps.add_noise not found or an issue with DataFrame apply.")
+    except Exception as e:
+        print(f"Error during robustness evaluation with noisy data: {e}")
 
 if __name__ == "__main__":
     # This structure assumes that when you run `python src/main/eval.py` from the root
