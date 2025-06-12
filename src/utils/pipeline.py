@@ -84,9 +84,16 @@ class SignalAugmentationPipeline:
         self.labeled_target_df = labeled_target_df
         self.final_labeled_df = pd.DataFrame()
         self.final_labeled_target_df = pd.DataFrame()
-        self.moving_avg_df = self._apply_moving_avg(window_length)
-        self.time_shift_df = self._apply_time_shift(lag, diff)
-        self.noise_df = self._apply_noise(noise_level)
+
+        # Parameters for augmentation
+        self.window_length = window_length
+        self.lag = lag
+        self.noise_target_snr_db = noise_level  # Renamed for clarity, now expects SNR in dB
+        self.diff = diff
+
+        self.moving_avg_df = self._apply_moving_avg(self.window_length)
+        self.time_shift_df = self._apply_time_shift(self.lag, self.diff)
+        self.noise_df = self._apply_noise(self.noise_target_snr_db)
 
     def _apply_moving_avg(self, window_length):
         moving_avg_df = self.labeled_df.apply(
@@ -116,9 +123,10 @@ class SignalAugmentationPipeline:
         )
         return time_shift_df
 
-    def _apply_noise(self, noise_level):
+    def _apply_noise(self, target_snr_db):  # Parameter renamed for clarity
+        # The lambda now passes the target_snr_db to SignalOps.add_noise
         noise_df = self.labeled_df.apply(
-            lambda x: SignalOps.add_noise(x, noise_level), axis=0
+            lambda x: SignalOps.add_noise(x.values, target_snr_db=target_snr_db), axis=0
         )
         noise_target_df = self.labeled_target_df.copy()
         self.final_labeled_df = pd.concat([self.final_labeled_df, noise_df], axis=0)

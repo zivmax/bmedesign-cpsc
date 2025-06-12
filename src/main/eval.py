@@ -176,36 +176,34 @@ def main():
         print(f"Error saving evaluation results to CSV: {e}")
 
     # Robustness evaluation
-    print("\\n--- Robustness Evaluation (Noisy Data) ---")
+    print("\n--- Robustness Evaluation (Noisy Data) ---")
     
     try:
         print("Generating noisy test data for robustness check...")
-        NOISE_LEVEL_ROBUSTNESS = 0.1 # Example noise level
+        TARGET_SNR_DB = 0 # Target SNR for robustness evaluation
         
         X_test_noisy = pd.DataFrame() # Initialize as empty
 
         if isinstance(X_test, pd.DataFrame) and not X_test.empty:
             X_test_T = X_test.T
-            # y_test is a pd.Series, convert to DataFrame for the pipeline
-            y_test_df_for_pipeline = y_test.to_frame() 
+            y_test_df_for_pipeline = y_test.to_frame()
 
             sap = SignalAugmentationPipeline(
-                labeled_df=X_test_T, # Signals as columns
-                labeled_target_df=y_test_df_for_pipeline, # Targets
-                noise_level=NOISE_LEVEL_ROBUSTNESS,
-                window_length=1,  # Corrected: Use 1 to safely neutralize moving average
-                lag=0,            # lag=0 for time_shift (results in zeros if diff=True)
-                diff=True         # Default for SignalAugmentationPipeline
+                labeled_df=X_test_T, 
+                labeled_target_df=y_test_df_for_pipeline, 
+                noise_level=TARGET_SNR_DB,  # Pass target SNR here
+                window_length=1, 
+                lag=0,            
+                diff=False # Changed from True to avoid double differentiation
             )
             
-            # sap.noise_df contains the noisy signals, with signals as columns
             X_test_noisy_T = sap.noise_df
             
             if X_test_noisy_T is not None and not X_test_noisy_T.empty:
-                X_test_noisy = X_test_noisy_T.T # Transpose back
-                X_test_noisy.columns = X_test.columns # Restore original column names
-                X_test_noisy.index = X_test.index   # Restore original index
-                print(f"Applied noise (level {NOISE_LEVEL_ROBUSTNESS}) via SignalAugmentationPipeline to {len(X_test_noisy)} test samples.")
+                X_test_noisy = X_test_noisy_T.T 
+                X_test_noisy.columns = X_test.columns 
+                X_test_noisy.index = X_test.index   
+                print(f"Applied noise to achieve target SNR of {TARGET_SNR_DB}dB via SignalAugmentationPipeline to {len(X_test_noisy)} test samples.")
             else:
                 print("Warning: SignalAugmentationPipeline returned empty or None noise_df.")
         else:
@@ -239,8 +237,8 @@ def main():
         print(f"Confusion Matrix (Noisy):\n{cm_noisy}")
 
         results_noisy_df = pd.DataFrame({
-            "eval_type": ["robustness_noisy"],
-            "noise_level": [NOISE_LEVEL_ROBUSTNESS],
+            "eval_type": ["robustness_snr"], # Changed eval_type for clarity
+            "target_snr_db": [TARGET_SNR_DB],
             "f1_score": [f1_noisy],
             "precision": [precision_noisy],
             "recall": [recall_noisy],

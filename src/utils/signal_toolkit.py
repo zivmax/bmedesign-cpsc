@@ -55,9 +55,50 @@ class SignalOps:
         return signal_array - shifted_signal if diff else shifted_signal
 
     @staticmethod
-    def add_noise(signal, noise_factor=0.1):
-        noise = np.random.normal(0, noise_factor, size=signal.shape)
-        return signal + noise
+    def add_noise(signal, target_snr_db=20):
+        """
+        Adds Gaussian noise to a signal to achieve a target SNR.
+
+        Args:
+            signal (np.ndarray): Input signal.
+            target_snr_db (float): Target Signal-to-Noise Ratio in decibels.
+
+        Returns:
+            np.ndarray: Signal with added noise.
+        """
+        signal_array = np.asarray(signal)
+        
+        # Calculate signal power (variance)
+        signal_power = np.var(signal_array)
+        
+        if signal_power == 0: # Handle zero-power signal case (e.g., all zeros)
+            # Adding noise to a zero signal, noise power is arbitrary or could be based on a reference
+            # For now, let's return the signal as is or add noise with a small default variance
+            # This case might need specific handling based on requirements.
+            # Adding noise with std_dev of 1 if signal power is 0.
+            noise_std_dev = 1 
+        else:
+            # Calculate noise power required for target SNR
+            # SNR_linear = 10^(SNR_dB / 10)
+            # P_noise = P_signal / SNR_linear
+            snr_linear = 10 ** (target_snr_db / 10.0)
+            noise_power = signal_power / snr_linear
+            
+            # Noise standard deviation is the square root of noise power
+            noise_std_dev = np.sqrt(noise_power)
+        
+        # Generate noise
+        noise = np.random.normal(0, noise_std_dev, size=signal_array.shape)
+        
+        return signal_array + noise
+
+    @staticmethod
+    def butter_lowpass_filter(data, cutoff, fs, order=5):
+        nyquist = 0.5 * fs
+        normal_cutoff = cutoff / nyquist
+        b, a = sig.butter(order, normal_cutoff, btype='low', analog=False)
+        y = sig.filtfilt(b, a, data)
+        return y
 
 
 class SignalFeatures:
