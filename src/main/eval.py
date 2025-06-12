@@ -1,115 +1,184 @@
-import csv
-import os
-import datetime
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from main.model import HybridModel
-from utils.pipeline import LabelPipeline
+import os
+from ..utils.pipeline import LabelPipeline
 
+# Assuming HybridModel is in the same directory in model.py
+from .model import HybridModel
 
-def evaluate_model(
-    model_save_load_path,
-    cnn_params,
-    classifier_params,
-    data_path="data/",
-    results_csv_path="evaluation_results.csv",
-):
+# Parameters from main.py
+# CNN parameters from main.py
+CNN_PARAMS = {
+    "input_length": 4000,
+    "embedding_dim": 256,
+    "kernel_sizes": [3, 3, 5, 5],
+    "num_filters": 64,
+    "drop_out": 0.2,
+}
+
+# Classifier parameters (XGBoost) from main.py - not strictly needed for loading, but good for consistency
+CLASSIFIER_PARAMS = {
+    "n_estimators": 500,
+    "max_depth": 7,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 0.9,
+    "gamma": 0,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "objective": "binary:logistic",
+    "eval_metric": "logloss",
+}
+
+MODEL_PATH_PREFIX = "models/hybrid_model_parallel_final"
+TEST_DATA_PATH = "data/testdata.csv"
+# OUTPUT_CSV_PATH is defined below, before it's used.
+BATCH_SIZE = 32 # From main.py's model.train call, or choose a sensible default for eval
+DEVICE = None # Autodetect, similar to main.py's HybridModel instantiation
+
+def load_data(file_path: str) -> tuple[pd.DataFrame, pd.Series]:
+    """Loads data from a CSV file.
+    Assumes the CSV has a 'target' column and the rest are features.
     """
-    Loads a trained model, evaluates it on validation data, and saves the results to a CSV file.
+    print(f"Loading data from {file_path}...")
+    df = pd.read_csv(file_path)
+    if 'target' not in df.columns:
+        raise ValueError(f"Test data CSV file '{file_path}' must contain a 'target' column.")
+    
+    X = df.drop(columns=['target'])
+    y = df['target']
+    print(f"Data loaded: {len(X)} samples.")
+    return X, y
 
-    Args:
-        model_save_load_path (str): Path prefix for loading the model weights.
-        cnn_params (dict): Parameters for the CNNCore model.
-        classifier_params (dict): Parameters for the XGBoost classifier.
-        data_path (str): Path to the directory containing traindata.csv and unlabeled_predictions.csv.
-        results_csv_path (str): Path to save the evaluation results CSV.
-    """
-    SEED = 42
+def main():
+    # Hardcoded output path, as args are removed.
+    current_output_csv_path = "data/evaluation_results.csv"
 
-    # Load data
-    train_df = pd.read_csv(os.path.join(data_path, "traindata.csv"))
-    # Assuming unlabeled_predictions.csv is needed by LabelPipeline
-    labels_df = pd.read_csv(
-        os.path.join(data_path, "unlabeled_predictions.csv"), delimiter=","
-    )
+    # Use hardcoded CNN_PARAMS
+    cnn_params = CNN_PARAMS
+    print(f"Using CNN parameters from main.py: {cnn_params}")
+
+    train_df_path = "data/traindata.csv"
+    unlabeled_preds_path = "data/unlabeled_predictions.csv"
+
+    train_df = pd.read_csv(train_df_path)
 
     lp = LabelPipeline(train_df)
-    # Corrected call to add_labels, assuming it expects a DataFrame for labels
-    labeled_signals, targets = lp.add_labels(labels_df, cutedge=(500, 1000))
+    temp_df = pd.read_csv(unlabeled_preds_path, header=None)
+    labels_for_pseudo = None
 
-    print(
-        f"Total labeled signals: {labeled_signals.shape[0]}, Total targets: {targets.shape[0]}"
-    )
+    # Check if the DataFrame is not empty and has at least one column
+    if temp_df.shape[0] == 19000:
+        labels_for_pseudo = temp_df.iloc[
+            :, 0
+        ]  # Results in a Pandas Series from the first column
+        print(
+            f"Info: Loaded {len(labels_for_pseudo)} pseudo-labels from the first column of {unlabeled_preds_path} (detected {temp_df.shape[1]} columns)."
+        )
+    else:
+        print(
+            f"Warning: {unlabeled_preds_path} is empty or has no columns. No pseudo-labels loaded."
+        )
 
-    _, X_val, _, y_val = train_test_split(
-        labeled_signals, targets, test_size=0.2, random_state=SEED
-    )
+    labeled_signals, targets = lp.add_labels(labels_for_pseudo, cutedge=(500, 1000))
 
-    # Initialize model
-    model = HybridModel(cnn_params=cnn_params, classifier_params=classifier_params)
+    # Use hardcoded CLASSIFIER_PARAMS (though not strictly needed for loading)
+    classifier_params = CLASSIFIER_PARAMS
+    
+    print(f"Initializing HybridModel...")
+    try:
+        model = HybridModel(cnn_params=cnn_params, 
+                            classifier_params=classifier_params, 
+                            device=DEVICE)
+    except Exception as e:
+        print(f"Error initializing HybridModel: {e}")
+        print("This could be due to incorrect cnn_params or issues with the HybridModel class itself.")
+        return
 
-    # Load trained model weights
-    print(f"Loading model from: {model_save_load_path}")
-    model.load_weights(model_save_load_path)
-    print("Model loaded successfully.")
+    print(f"Loading model weights from prefix: {MODEL_PATH_PREFIX}")
+    try:
+        model.load_weights(MODEL_PATH_PREFIX) # This method in model.py should print success/failure
+    except Exception as e:
+        print(f"Error loading model weights: {e}")
+        print("Ensure the model_path_prefix is correct and all model files (.pth, .json, .joblib) exist.")
+        return
 
-    # Evaluate the model on the validation set
-    print("Evaluating model on validation set...")
-    eval_results = model.evaluate(X_val, y_val, plot=False)
+    print(f"Loading test data from: {TEST_DATA_PATH}")
+    try:
+        X_test, y_test = lp.add_labels(labels_for_pseudo, cutedge=(500, 1000))
 
-    # Prepare results for CSV output
-    results_to_save = {
-        "Timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "ModelPath": model_save_load_path,
-        "Precision": eval_results.get("precision"),
-        "Recall": eval_results.get("recall"),
-        "F1_Score": eval_results.get("f1"),
-        "Time_Per_Prediction_Seconds": eval_results.get("time_per_prediction"),
-    }
+    except Exception as e:
+        print(f"Error loading test data: {e}")
+        return
+    
+    if X_test.empty:
+        print("Test data is empty. Cannot perform evaluation.")
+        return
 
-    # Write results to CSV
-    file_exists = os.path.isfile(results_csv_path)
-    with open(results_csv_path, "a", newline="") as csvfile:
-        fieldnames = [
-            "Timestamp",
-            "ModelPath",
-            "Precision",
-            "Recall",
-            "F1_Score",
-            "Time_Per_Prediction_Seconds",
-        ]
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        if not file_exists:
-            writer.writeheader()  # Write header only if file is new
-        writer.writerow(results_to_save)
+    print("Starting evaluation...")
+    try:
+        eval_results = model.evaluate(X_test, y_test, batch_size=BATCH_SIZE, plot=False)
+    except Exception as e:
+        print(f"Error during model evaluation: {e}")
+        print("This might be due to issues in HybridModel's predict or evaluate methods, or data mismatches.")
+        return
 
-    print(f"Evaluation results saved to {results_csv_path}")
-    print(f"Validation F1 Score: {eval_results['f1']}")
+    if not eval_results:
+        print("Evaluation did not return any results. Cannot proceed.")
+        return
 
+    f1 = eval_results.get("f1")
+    precision = eval_results.get("precision")
+    recall = eval_results.get("recall")
+    time_per_pred_seconds = eval_results.get("time_per_prediction")
+    cm = eval_results.get("confusion_matrix")
+
+    if any(m is None for m in [f1, precision, recall, time_per_pred_seconds, cm]):
+        print("Evaluation results dictionary is missing one or more required keys (f1, precision, recall, time_per_prediction, confusion_matrix).")
+        print(f"Received keys: {list(eval_results.keys())}")
+        return
+        
+    time_per_pred_ms = time_per_pred_seconds * 1000
+
+    print("\n--- Evaluation Summary ---")
+    print(f"F1 Score: {f1:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"Time per inference (avg over test set): {time_per_pred_ms:.4f} ms")
+    print(f"Confusion Matrix:\n{cm}")
+
+    # Save results to CSV
+    results_df = pd.DataFrame({
+        "model_path_prefix": [MODEL_PATH_PREFIX],
+        "test_data_path": [TEST_DATA_PATH],
+        "f1_score": [f1],
+        "precision": [precision],
+        "recall": [recall],
+        "time_per_inference_ms": [time_per_pred_ms],
+        "batch_size": [BATCH_SIZE]
+    })
+
+    output_dir = os.path.dirname(current_output_csv_path)
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+            print(f"Created output directory: {output_dir}")
+        except OSError as e:
+            print(f"Error creating output directory {output_dir}: {e}")
+            print(f"Attempting to save to current directory: {os.path.basename(current_output_csv_path)}")
+            current_output_csv_path = os.path.basename(current_output_csv_path)
+
+
+    try:
+        results_df.to_csv(current_output_csv_path, index=False)
+        print(f"Evaluation results saved to {current_output_csv_path}")
+    except Exception as e:
+        print(f"Error saving evaluation results to CSV: {e}")
 
 if __name__ == "__main__":
-    # These parameters should match those used during training
-    cnn_params_eval = {
-        "input_length": 4000,
-        "embedding_dim": 256,
-        "kernel_sizes": [3, 3, 5, 5],
-        "num_filters": 64,
-        "drop_out": 0.2,
-    }
-    classifier_params_eval = {
-        "n_estimators": 500,
-        "max_depth": 7,
-        "learning_rate": 0.05,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "min_child_weight": 0.9,
-        "gamma": 0,
-        "reg_alpha": 0.1,
-        "reg_lambda": 1.0,
-        "objective": "binary:logistic",
-        "eval_metric": "logloss",
-    }
-
-    model_path = "models/hybrid_model_final"
-
-    evaluate_model(model_path, cnn_params_eval, classifier_params_eval)
+    # This structure assumes that when you run `python src/main/eval.py` from the root
+    # of your project (/home/zivmax/bmedesign-cpsc), Python's import system
+    # correctly handles `from .model import HybridModel`.
+    # If you encounter import errors, you might need to adjust Python's path
+    # or how you run the script (e.g., `python -m src.main.eval`).
+    main()

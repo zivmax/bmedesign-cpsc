@@ -112,22 +112,20 @@ if __name__ == "__main__":
     print("\nModel training finished.")
     model.train_process_plot(save=True, val_loss_log=False)
 
-    if not X_final_val.empty():
+    if not X_final_val.empty:
         print("\nEvaluating on the final held-out validation set:")
         eval_results_final_val = model.evaluate(X_final_val, y_final_val, plot=True)
         print(f"Final Validation F1 Score: {eval_results_final_val['f1']:.4f}")
         print(f"Final Validation Precision: {eval_results_final_val['precision']:.4f}")
         print(f"Final Validation Recall: {eval_results_final_val['recall']:.4f}")
-        print(f"Final Validation Accuracy: {eval_results_final_val['accuracy']:.4f}")
 
         # Save final validation metrics
         final_val_metrics_data = {
-            "Metric": ["F1 Score", "Precision", "Recall", "Accuracy"],
+            "Metric": ["F1 Score", "Precision", "Recall"],
             "Score": [
                 eval_results_final_val["f1"],
                 eval_results_final_val["precision"],
                 eval_results_final_val["recall"],
-                eval_results_final_val["accuracy"],
             ],
         }
         final_val_metrics_df = pd.DataFrame(final_val_metrics_data)

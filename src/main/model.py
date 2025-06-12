@@ -172,8 +172,20 @@ def _train_fold_worker(args):
         num_workers=0,
     )
 
-    fold_train_losses, fold_train_f1s, fold_train_accuracies = [], [], []
-    fold_val_losses, fold_val_f1s, fold_val_accuracies = [], [], []
+    (
+        fold_train_losses,
+        fold_train_f1s,
+        fold_train_accuracies,
+        fold_train_precisions,
+        fold_train_recalls,
+    ) = ([], [], [], [], [])
+    (
+        fold_val_losses,
+        fold_val_f1s,
+        fold_val_accuracies,
+        fold_val_precisions,
+        fold_val_recalls,
+    ) = ([], [], [], [], [])
     best_val_loss_nn = np.inf
     patience_counter = 0
     best_fold_nn_model_state = None  # For NN part
@@ -215,9 +227,23 @@ def _train_fold_worker(args):
             average="weighted",
             zero_division=0,
         )
+        epoch_train_precision = precision_score(
+            epoch_train_labels_list,
+            epoch_train_preds_list,
+            average="weighted",
+            zero_division=0,
+        )
+        epoch_train_recall = recall_score(
+            epoch_train_labels_list,
+            epoch_train_preds_list,
+            average="weighted",
+            zero_division=0,
+        )
         fold_train_losses.append(avg_epoch_train_loss)
         fold_train_f1s.append(epoch_train_f1)
         fold_train_accuracies.append(epoch_train_accuracy)
+        fold_train_precisions.append(epoch_train_precision)
+        fold_train_recalls.append(epoch_train_recall)
 
         # Validation for NN
         cnn_model.eval()
@@ -251,9 +277,23 @@ def _train_fold_worker(args):
             average="weighted",
             zero_division=0,
         )
+        epoch_val_precision = precision_score(
+            epoch_val_labels_list,
+            epoch_val_preds_list,
+            average="weighted",
+            zero_division=0,
+        )
+        epoch_val_recall = recall_score(
+            epoch_val_labels_list,
+            epoch_val_preds_list,
+            average="weighted",
+            zero_division=0,
+        )
         fold_val_losses.append(avg_epoch_val_loss)
         fold_val_f1s.append(epoch_val_f1)
         fold_val_accuracies.append(epoch_val_accuracy)
+        fold_val_precisions.append(epoch_val_precision)
+        fold_val_recalls.append(epoch_val_recall)
 
         if common_train_params.get("verbose_epoch", False):  # Control epoch verbosity
             print(
@@ -264,13 +304,19 @@ def _train_fold_worker(args):
             best_val_loss_nn = avg_epoch_val_loss
             patience_counter = 0
             best_fold_nn_model_state = {
-                "cnn_state": {k: v.cpu() for k, v in cnn_model.state_dict().items()},
-                "classifier_layer_state": {
-                    k: v.cpu() for k, v in classifier_layer.state_dict().items()
-                },
+                "cnn_state": cnn_model.state_dict(),
+                "classifier_layer_state": classifier_layer.state_dict(),
                 "epoch": epoch,
+                "train_loss_nn": avg_epoch_train_loss,
+                "train_f1_nn": epoch_train_f1,
+                "train_precision_nn": epoch_train_precision,
+                "train_recall_nn": epoch_train_recall,
+                "train_accuracy_nn": epoch_train_accuracy,
                 "val_loss_nn": avg_epoch_val_loss,
                 "val_f1_nn": epoch_val_f1,
+                "val_precision_nn": epoch_val_precision,
+                "val_recall_nn": epoch_val_recall,
+                "val_accuracy_nn": epoch_val_accuracy,
             }
         else:
             patience_counter += 1
@@ -324,17 +370,21 @@ def _train_fold_worker(args):
         val_xgb_f1 = f1_score(
             y_val_fold, val_preds_xgb, average="weighted", zero_division=0
         )
+        val_xgb_precision = precision_score(
+            y_val_fold, val_preds_xgb, average="weighted", zero_division=0
+        )
+        val_xgb_recall = recall_score(
+            y_val_fold, val_preds_xgb, average="weighted", zero_division=0
+        )
 
         final_fold_model_details = (
             best_fold_nn_model_state.copy()
         )  # Start with NN model details
-        final_fold_model_details["classifier_xgb_state"] = (
-            classifier_xgb  # Store XGBoost model object
-        )
+        final_fold_model_details["classifier_xgb_state"] = classifier_xgb
         final_fold_model_details["val_xgb_f1"] = val_xgb_f1
-        final_fold_model_details["pipeline_state"] = (
-            ip  # Store fitted InteractionPipeline
-        )
+        final_fold_model_details["val_xgb_precision"] = val_xgb_precision
+        final_fold_model_details["val_xgb_recall"] = val_xgb_recall
+        final_fold_model_details["pipeline_state"] = ip
 
     if common_train_params.get("verbose", False):
         val_f1_nn_print = (
@@ -346,14 +396,54 @@ def _train_fold_worker(args):
             f"[Fold {fold_num+1}] Finished on {device_str}. Val F1 (NN): {val_f1_nn_print:.4f}, Val F1 (XGB): {final_fold_model_details.get('val_xgb_f1', -1):.4f}"
         )
 
+    # Save models for the current fold
+    model_save_path_base = common_train_params.get("model_save_path_base")
+    if model_save_path_base:
+        fold_save_dir = os.path.join(model_save_path_base, f"fold_{fold_num + 1}")
+        os.makedirs(fold_save_dir, exist_ok=True)
+
+        if common_train_params.get("verbose", False):
+            print(f"[Fold {fold_num+1}] Saving models to {fold_save_dir}")
+
+        # Save CNN model state from best_fold_nn_model_state (which is copied to final_fold_model_details)
+        cnn_state_to_save = final_fold_model_details.get("cnn_state")
+        if cnn_state_to_save:
+            torch.save(cnn_state_to_save, os.path.join(fold_save_dir, "Hybrid_CNN.pth"))
+            if common_train_params.get("verbose", False):
+                print(f"[Fold {fold_num+1}] Saved CNN model to {os.path.join(fold_save_dir, 'Hybrid_CNN.pth')}")
+        elif common_train_params.get("verbose", False):
+            print(f"[Fold {fold_num+1}] CNN state not found, not saving CNN model for this fold.")
+
+        # Save XGBoost model
+        xgb_model_to_save = final_fold_model_details.get("classifier_xgb_state")
+        if xgb_model_to_save:
+            xgb_model_to_save.save_model(os.path.join(fold_save_dir, "Hybrid_XGB.json"))
+            if common_train_params.get("verbose", False):
+                print(f"[Fold {fold_num+1}] Saved XGBoost model to {os.path.join(fold_save_dir, 'Hybrid_XGB.json')}")
+        elif common_train_params.get("verbose", False):
+            print(f"[Fold {fold_num+1}] XGBoost model not found, not saving XGBoost model for this fold.")
+
+        # Save InteractionPipeline
+        ip_pipeline_to_save = final_fold_model_details.get("pipeline_state")
+        if ip_pipeline_to_save:
+            joblib.dump(ip_pipeline_to_save, os.path.join(fold_save_dir, "IP.joblib"))
+            if common_train_params.get("verbose", False):
+                print(f"[Fold {fold_num+1}] Saved InteractionPipeline to {os.path.join(fold_save_dir, 'IP.joblib')}")
+        elif common_train_params.get("verbose", False):
+            print(f"[Fold {fold_num+1}] InteractionPipeline not found, not saving InteractionPipeline for this fold.")
+
     return {
         "fold_num": fold_num,
         "train_losses": fold_train_losses,
         "train_f1s": fold_train_f1s,
         "train_accuracies": fold_train_accuracies,
+        "train_precisions": fold_train_precisions,  # Added for completeness
+        "train_recalls": fold_train_recalls,  # Added for completeness
         "val_losses": fold_val_losses,
         "val_f1s": fold_val_f1s,
-        "val_accuracies": fold_val_accuracies,  # These are from NN part
+        "val_accuracies": fold_val_accuracies,
+        "val_precisions": fold_val_precisions,  # Added for completeness
+        "val_recalls": fold_val_recalls,  # Added for completeness
         "best_model_details": final_fold_model_details,  # Contains all states and metrics for this fold
         "device_used": device_str,
     }
@@ -431,6 +521,7 @@ class HybridModel:
         self.classifier = None
         self.ip = None
         self.total_fold_results = None
+        self.best_fold_index = -1  # Added to store index of best fold based on XGB F1
 
     def train(
         self,
@@ -509,8 +600,9 @@ class HybridModel:
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
             "early_stopping": early_stopping,
-            "verbose": verbose,
-            "verbose_epoch": verbose_epoch,
+            "verbose": verbose,  # Overall verbosity
+            "verbose_epoch": verbose_epoch,  # Per-epoch verbosity within folds
+            "model_save_path_base": self.model_save_path,  # Pass base path for per-fold saving
         }
 
         fold_worker_args = []
@@ -538,117 +630,142 @@ class HybridModel:
         ctx = multiprocessing.get_context("spawn")
         # Cap pool processes by num_parallel_processes, which is min(len(available_devices_str), splits)
         with ctx.Pool(processes=num_parallel_processes) as pool:
-            all_fold_run_results = pool.map(_train_fold_worker, fold_worker_args)
+            results_list = pool.map(_train_fold_worker, fold_worker_args)
+        pool.close()
+        pool.join()
+        self.total_fold_results = results_list
 
-        self.total_fold_results = {
-            "train_loss": [res["train_losses"] for res in all_fold_run_results],
-            "train_accuracy": [res["train_accuracies"] for res in all_fold_run_results],
-            "train_f1": [res["train_f1s"] for res in all_fold_run_results],
-            "val_loss": [
-                res["val_losses"] for res in all_fold_run_results
-            ],  # NN val losses
-            "val_accuracy": [
-                res["val_accuracies"] for res in all_fold_run_results
-            ],  # NN val accuracies
-            "val_f1": [res["val_f1s"] for res in all_fold_run_results],  # NN val F1s
-            "best_models_details": [
-                res["best_model_details"] for res in all_fold_run_results
-            ],
-        }
+        fold_metrics_data = []
+        best_overall_xgb_f1 = -1
+        self.best_fold_index = -1
 
-        # Filter out folds that might have failed (val_xgb_f1 = -1)
-        valid_best_models = [
-            m
-            for m in self.total_fold_results["best_models_details"]
-            if m.get("val_xgb_f1", -1) > -1
-        ]
+        for i, result in enumerate(results_list):
+            fold_num = result["fold_num"] + 1  # 1-indexed
+            best_nn_metrics = result.get("best_model_details", {})
 
-        if not valid_best_models:
-            print(
-                "Error: Training failed for all folds or no valid models were produced."
-            )
-            return self.total_fold_results  # Or raise an error
+            nn_train_f1 = best_nn_metrics.get("train_f1_nn", np.nan)
+            nn_train_precision = best_nn_metrics.get("train_precision_nn", np.nan)
+            nn_train_recall = best_nn_metrics.get("train_recall_nn", np.nan)
 
-        best_overall_model_details = max(
-            valid_best_models, key=lambda x: x.get("val_xgb_f1")
-        )
+            nn_val_f1 = best_nn_metrics.get("val_f1_nn", np.nan)
+            nn_val_precision = best_nn_metrics.get("val_precision_nn", np.nan)
+            nn_val_recall = best_nn_metrics.get("val_recall_nn", np.nan)
 
-        # Find the original full result for the best model to get fold_num and device_used for printing
-        best_model_full_res_idx = -1
-        for idx, res_details in enumerate(
-            self.total_fold_results["best_models_details"]
-        ):
-            if res_details is best_overall_model_details:  # Check object identity
-                best_model_full_res_idx = idx
-                break
+            xgb_val_f1 = best_nn_metrics.get("val_xgb_f1", np.nan)
+            xgb_val_precision = best_nn_metrics.get("val_xgb_precision", np.nan)
+            xgb_val_recall = best_nn_metrics.get("val_xgb_recall", np.nan)
 
-        best_model_fold_num_print = (
-            all_fold_run_results[best_model_full_res_idx]["fold_num"] + 1
-            if best_model_full_res_idx != -1
-            else "N/A"
-        )
-        best_model_device_print = (
-            all_fold_run_results[best_model_full_res_idx]["device_used"]
-            if best_model_full_res_idx != -1
-            else "N/A"
-        )
-
-        if verbose:
-            print(
-                f"Best fold XGB F1: {best_overall_model_details.get('val_xgb_f1'):.4f} from fold {best_model_fold_num_print} on device {best_model_device_print}"
+            fold_metrics_data.append(
+                {
+                    "Fold": fold_num,
+                    "NN_Train_F1": nn_train_f1,
+                    "NN_Train_Precision": nn_train_precision,
+                    "NN_Train_Recall": nn_train_recall,
+                    "NN_Val_F1": nn_val_f1,
+                    "NN_Val_Precision": nn_val_precision,
+                    "NN_Val_Recall": nn_val_recall,
+                    "XGB_Val_F1": xgb_val_f1,
+                    "XGB_Val_Precision": xgb_val_precision,
+                    "XGB_Val_Recall": xgb_val_recall,
+                }
             )
 
-        # Save components of the best overall model
-        cnn_save_path = self.model_save_path + "_Hybrid_CNN.pth"
-        torch.save(best_overall_model_details["cnn_state"], cnn_save_path)
-        if verbose:
-            print(f"Best Hybrid CNN Model state saved to {cnn_save_path}")
+            if xgb_val_f1 > best_overall_xgb_f1:  # Check for np.nan if necessary
+                best_overall_xgb_f1 = xgb_val_f1
+                self.best_fold_index = i  # Store index of the best fold
 
-        xgb_model_to_save = best_overall_model_details["classifier_xgb_state"]
-        xgb_save_path = self.model_save_path + "_Hybrid_XGB.json"
-        xgb_model_to_save.save_model(xgb_save_path)
-        if verbose:
-            print(f"Best Hybrid XGBoost Model saved to {xgb_save_path}")
-
-        ip_pipeline_to_save = best_overall_model_details["pipeline_state"]
-        if hasattr(ip_pipeline_to_save, "steps"):
-            ip_save_path = self.model_save_path + "_Hybrid_IP.joblib"
-            joblib.dump(ip_pipeline_to_save, ip_save_path)
+        fold_metrics_df = DataFrame(fold_metrics_data)
+        metrics_csv_path = "data/fold_evaluation_metrics.csv"
+        try:
+            fold_metrics_df.to_csv(metrics_csv_path, index=False)
             if verbose:
-                print(f"Best Hybrid Interaction Pipeline saved to {ip_save_path}")
+                print(f"Per-fold evaluation metrics saved to {metrics_csv_path}")
+        except Exception as e:
+            if verbose:
+                print(f"Failed to save per-fold evaluation metrics: {e}")
 
-        # Load the best model components into self for the main HybridModel object
-        self.cnn_model.load_state_dict(best_overall_model_details["cnn_state"])
-        self.cnn_model.to(self.device)  # Move to the main model's designated device
-        self.cnn_model.eval()
-        self.classifier = best_overall_model_details["classifier_xgb_state"]
-        self.ip = best_overall_model_details["pipeline_state"]
-
-        # Remove population of self.fold_models and self.fold_pipelines
-        # self.fold_models = []
-        # self.fold_pipelines = []
-        # for fold_details_item in self.total_fold_results[
-        #     "best_models_details"
-        # ]:  # Iterate over the list of dicts
-        #     if (
-        #         fold_details_item and fold_details_item.get("val_xgb_f1", -1) > -1
-        #     ):  # Check if fold was successful
-        #         fold_cnn_instance = CNNCore(**self.cnn_params)
-        #         fold_cnn_instance.load_state_dict(fold_details_item["cnn_state"])
-        #         fold_cnn_instance.eval()
-        #
-        #         self.fold_models.append(
-        #             {
-        #                 "cnn_model": fold_cnn_instance,
-        #                 "classifier": fold_details_item["classifier_xgb_state"],
-        #             }
-        #         )
-        #         self.fold_pipelines.append(fold_details_item["pipeline_state"])
-        if verbose:
-            print(
-                f"Best model components loaded into HybridModel instance."  # Removed mention of fold models
+        # Load the best model based on XGBoost F1 score from the folds
+        if self.total_fold_results and self.best_fold_index != -1:
+            best_fold_details = self.total_fold_results[self.best_fold_index].get(
+                "best_model_details", {}
             )
-        return self.total_fold_results
+            if best_fold_details:
+                # Load CNN (NN core)
+                cnn_state = best_fold_details.get("cnn_state")
+                if cnn_state:
+                    self.cnn_model.load_state_dict(cnn_state)
+                    if verbose:
+                        print(
+                            f"Loaded CNN state from best fold ({self.best_fold_index + 1}) for final model."
+                        )
+                else:
+                    if verbose:
+                        print(
+                            f"Warning: CNN state not found in best fold ({self.best_fold_index + 1})."
+                        )
+
+                # Load XGBoost classifier
+                self.classifier = best_fold_details.get("classifier_xgb_state")
+                if self.classifier and verbose:
+                    print(
+                        f"Loaded XGBoost classifier from best fold ({self.best_fold_index + 1}) for final model."
+                    )
+                elif not self.classifier and verbose:
+                    print(
+                        f"Warning: XGBoost classifier state not found in best fold ({self.best_fold_index + 1})."
+                    )
+
+                # Load InteractionPipeline
+                self.ip = best_fold_details.get("pipeline_state")
+                if self.ip and verbose:
+                    print(
+                        f"Loaded InteractionPipeline from best fold ({self.best_fold_index + 1})."
+                    )
+                elif not self.ip and verbose:
+                    print(
+                        f"Warning: InteractionPipeline state not found in best fold ({self.best_fold_index + 1})."
+                    )
+
+                # Save the components of the best model
+                if self.model_save_path:
+                    # Save CNN (NN core)
+                    if cnn_state:
+                        torch.save(cnn_state, f"{self.model_save_path}_Hybrid_CNN.pth")
+                        if verbose:
+                            print(
+                                f"Saved best CNN state to {self.model_save_path}_Hybrid_CNN.pth"
+                            )
+
+                    # Save XGBoost model
+                    if self.classifier:
+                        self.classifier.save_model(
+                            f"{self.model_save_path}_Hybrid_XGB.json"
+                        )
+                        if verbose:
+                            print(
+                                f"Saved best XGBoost model to {self.model_save_path}_Hybrid_XGB.json"
+                            )
+
+                    # Save InteractionPipeline
+                    if self.ip:
+                        joblib.dump(
+                            self.ip,
+                            f"{self.model_save_path}_IP.joblib",
+                        )
+                        if verbose:
+                            print(
+                                f"Saved best InteractionPipeline to {self.model_save_path}_IP.joblib"
+                            )
+
+            else:
+                if verbose:
+                    print(
+                        "Warning: No details found for the best fold. Final model components might not be loaded/saved."
+                    )
+        elif verbose:
+            print(
+                "Warning: Could not determine the best fold. Final model components might not be loaded/saved."
+            )
 
     def train_process_plot(self, save=True, val_loss_log=False, filter_coeff=None):
         if not self.total_fold_results:
@@ -663,7 +780,8 @@ class HybridModel:
         # Plotting for train/val loss (NN)
         plt.figure(figsize=(16, 6))
         plt.subplot(1, 2, 1)
-        for idx, loss_list in enumerate(self.total_fold_results["train_loss"]):
+        for idx, fold_result in enumerate(self.total_fold_results):
+            loss_list = fold_result.get("train_loss")
             if loss_list:  # Check if list is not empty
                 sns.lineplot(
                     x=range(len(loss_list)),
@@ -679,9 +797,8 @@ class HybridModel:
         plt.grid(True, linestyle="--", alpha=0.7)
 
         plt.subplot(1, 2, 2)
-        for idx, loss_list in enumerate(
-            self.total_fold_results["val_loss"]
-        ):  # NN val losses
+        for idx, fold_result in enumerate(self.total_fold_results):
+            loss_list = fold_result.get("val_loss")  # NN val losses
             if not loss_list:
                 continue  # Skip empty list
             processed_loss_list = loss_list
@@ -755,7 +872,8 @@ class HybridModel:
         # Plot for F1 scores (NN)
         plt.figure(figsize=(16, 6))
         plt.subplot(1, 2, 1)
-        for idx, f1_list in enumerate(self.total_fold_results["train_f1"]):
+        for idx, fold_result in enumerate(self.total_fold_results):
+            f1_list = fold_result.get("train_f1")
             if f1_list:
                 sns.lineplot(
                     x=range(len(f1_list)),
@@ -771,7 +889,8 @@ class HybridModel:
         plt.grid(True, linestyle="--", alpha=0.7)
 
         plt.subplot(1, 2, 2)
-        for idx, f1_list in enumerate(self.total_fold_results["val_f1"]):  # NN val F1s
+        for idx, fold_result in enumerate(self.total_fold_results):
+            f1_list = fold_result.get("val_f1")  # NN val F1s
             if f1_list:
                 sns.lineplot(
                     x=range(len(f1_list)),
@@ -794,7 +913,8 @@ class HybridModel:
         # Plot for accuracies (NN)
         plt.figure(figsize=(16, 6))
         plt.subplot(1, 2, 1)
-        for idx, acc_list in enumerate(self.total_fold_results["train_accuracy"]):
+        for idx, fold_result in enumerate(self.total_fold_results):
+            acc_list = fold_result.get("train_accuracy")
             if acc_list:
                 sns.lineplot(
                     x=range(len(acc_list)),
@@ -810,9 +930,8 @@ class HybridModel:
         plt.grid(True, linestyle="--", alpha=0.7)
 
         plt.subplot(1, 2, 2)
-        for idx, acc_list in enumerate(
-            self.total_fold_results["val_accuracy"]
-        ):  # NN val accuracies
+        for idx, fold_result in enumerate(self.total_fold_results):
+            acc_list = fold_result.get("val_accuracy")  # NN val accuracies
             if acc_list:
                 sns.lineplot(
                     x=range(len(acc_list)),
@@ -952,8 +1071,6 @@ class HybridModel:
                     if cls in [0, 1]:  # Ensure it's one of the expected binary labels
                         # Count how many times this single class was predicted correctly/incorrectly
                         # This is tricky without knowing the "other" class.
-                        # For simplicity, if only class 0 is present and predicted, it's TN. If only 1, TP.
-                        # This part of CM reconstruction can be complex.
                         # A simpler approach for a fixed binary [0,1] problem:
                         tn, fp, fn, tp = 0, 0, 0, 0
                         for i in range(len(predictions)):
@@ -994,7 +1111,7 @@ class HybridModel:
     def load_weights(self, model_path_prefix):
         cnn_path = model_path_prefix + "_Hybrid_CNN.pth"
         xgb_path = model_path_prefix + "_Hybrid_XGB.json"
-        ip_path = model_path_prefix + "_Hybrid_IP.joblib"
+        ip_path = model_path_prefix + "_IP.joblib"  # Corrected filename
 
         if os.path.exists(cnn_path):
             self.cnn_model.load_state_dict(
