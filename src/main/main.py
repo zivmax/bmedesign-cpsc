@@ -129,7 +129,7 @@ if __name__ == "__main__":
             ],
         }
         final_val_metrics_df = pd.DataFrame(final_val_metrics_data)
-        metrics_save_path = "data/main_script_final_validation_metrics.csv"
+        metrics_save_path = "src/main/main_script_final_validation_metrics.csv"
         final_val_metrics_df.to_csv(metrics_save_path, index=False)
         print(f"Final validation metrics saved to {metrics_save_path}")
     else:

@@ -675,7 +675,7 @@ class HybridModel:
                 self.best_fold_index = i  # Store index of the best fold
 
         fold_metrics_df = DataFrame(fold_metrics_data)
-        metrics_csv_path = "data/fold_evaluation_metrics.csv"
+        metrics_csv_path = "src/main/fold_evaluation_metrics.csv"
         try:
             fold_metrics_df.to_csv(metrics_csv_path, index=False)
             if verbose:
