@@ -1,0 +1,2 @@
+model_path_prefix,test_data_path,f1_score,precision,recall,time_per_inference_ms,batch_size
+models/hybrid_model_parallel_final,data/testdata.csv,0.9635499207606973,0.951048951048951,0.9763839032684678,1.1234882950782776,32

@@ -1,12 +1,6 @@
 *.mat
-*.csv
 _pycache_
 *.pyc
 *.png
-*.pth
-src/localtest.py
-src/auto_gl.ipynb
 *.html
-AutogluonModels
-src/model
-models/
+
